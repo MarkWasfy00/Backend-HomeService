@@ -10,10 +10,330 @@ datasource db {
   provider = "postgresql"
 }
 
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+enum UserRole {
+  CUSTOMER
+  TECHNICIAN
+  ADMIN
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  BLOCKED
+  SUSPENDED
+}
+
+enum Severity {
+  SMALL
+  MEDIUM
+  LARGE
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum RequestType {
+  AI_ESTIMATION
+  HOME_VISIT
+}
+
+enum RequestStatus {
+  PENDING
+  WAITING_FOR_TECHNICIAN
+  TECHNICIAN_SELECTED
+  ON_THE_WAY
+  ARRIVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  SELECTED
+  NOT_SELECTED
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// 1. users
+// ---------------------------------------------------------------------------
+
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        BigInt     @id @default(autoincrement())
+  fullName  String     @map("full_name") @db.VarChar(100)
+  phone     String     @unique @db.VarChar(20)
+
+  role       UserRole   @default(CUSTOMER)
+  city       String     @db.VarChar(100)
+  address    String     @db.Text
+  latitude   Decimal    @db.Decimal(10, 8)
+  longitude  Decimal    @db.Decimal(11, 8)
+  status     UserStatus @default(PENDING)
+
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt  DateTime?  @map("deleted_at") @db.Timestamptz(6)
+
+  // =========================
+  // Relations
+  // =========================
+
+  technicianProfile TechnicianProfile?
+
+  requestsAsCustomer   ServiceRequest[] @relation("RequestCustomer")
+  requestsAsTechnician ServiceRequest[] @relation("RequestTechnician")
+
+  technicianOffers TechnicianOffer[]
+
+  customerReviewsWritten CustomerReview[] @relation("CustomerReviewAuthor")
+  customerReviewsReceived CustomerReview[] @relation("CustomerReviewSubject")
+
+  technicianReviewsWritten TechnicianReview[] @relation("TechnicianReviewAuthor")
+  technicianReviewsReceived TechnicianReview[] @relation("TechnicianReviewSubject")
+
+  @@index([role])
+  @@index([status])
+  @@index([createdAt])
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// 2. otp 
+// ---------------------------------------------------------------------------
+
+model Otp {
+  id         BigInt    @id @default(autoincrement())
+  phone      String    @db.VarChar(20)
+  otpCode    String    @map("otp_code") @db.VarChar(10)
+  attempts   Int       @default(0)
+  blockedUntil DateTime? @map("blocked_until")
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  verifiedAt DateTime? @map("verified_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([phone, createdAt])
+  @@map("otp")
+}
+
+// ---------------------------------------------------------------------------
+// 3. categories 
+// ---------------------------------------------------------------------------
+
+model Category {
+  id                 BigInt   @id @default(autoincrement())
+  name               String   @unique @db.VarChar(100)
+  homeVisitBasePrice Decimal  @map("home_visit_base_price") @db.Decimal(10, 2)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pricing            CategoryPricing[]
+  technicianProfiles TechnicianProfile[]
+  serviceRequests    ServiceRequest[]
+
+  @@map("categories")
+}
+
+// ---------------------------------------------------------------------------
+// 4. category_pricing 
+// ---------------------------------------------------------------------------
+
+model CategoryPricing {
+  id         BigInt   @id @default(autoincrement())
+  categoryId BigInt   @map("category_id")
+  severity   Severity
+  minPrice   Decimal  @map("min_price") @db.Decimal(10, 2)
+  maxPrice   Decimal  @map("max_price") @db.Decimal(10, 2)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, severity])
+  @@index([categoryId])
+  @@map("category_pricing")
+}
+
+// ---------------------------------------------------------------------------
+// 5. technician_profiles 
+// ---------------------------------------------------------------------------
+
+model TechnicianProfile {
+  id                 BigInt             @id @default(autoincrement())
+  userId             BigInt             @unique @map("user_id")
+  categoryId         BigInt             @map("category_id")
+  profileImage       String?            @map("profile_image") @db.VarChar(255)
+  nationalId         String             @map("national_id") @db.VarChar(255)
+  criminalRecordFile String?            @map("criminal_record_file") @db.VarChar(255)
+  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
+  isAvailable        Boolean            @default(true) @map("is_available")
+  overallRating      Decimal            @default(0.00) @map("overall_rating") @db.Decimal(3, 2)
+  totalReviews       Int                @default(0) @map("total_reviews")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@index([categoryId, isAvailable])
+  @@index([categoryId])
+  @@index([isAvailable])
+  @@index([verificationStatus])
+  @@map("technician_profiles")
+}
+
+// ---------------------------------------------------------------------------
+// 6. service_requests 
+// ---------------------------------------------------------------------------
+
+model ServiceRequest {
+  id               BigInt        @id @default(autoincrement())
+  customerId       BigInt        @map("customer_id")
+  technicianId     BigInt?       @map("technician_id")
+  categoryId       BigInt        @map("category_id")
+  requestType      RequestType   @map("request_type")
+  description      String        @db.Text
+  serviceAddress   String        @map("service_address") @db.Text
+  serviceCity      String        @map("service_city") @db.VarChar(100)
+  serviceLatitude  Decimal       @map("service_latitude") @db.Decimal(10, 8)
+  serviceLongitude Decimal       @map("service_longitude") @db.Decimal(11, 8)
+  distanceKm       Decimal?      @map("distance_km") @db.Decimal(10, 2)
+  visitFee         Decimal?      @map("visit_fee") @db.Decimal(10, 2)
+  status           RequestStatus @default(PENDING)
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  customer   User     @relation("RequestCustomer", fields: [customerId], references: [id], onDelete: Restrict)
+  technician User?    @relation("RequestTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  attachments      RequestAttachment[]
+  aiEstimation     AiEstimation?
+  offers           TechnicianOffer[]
+  customerReview   CustomerReview?
+  technicianReview TechnicianReview?
+
+  @@index([customerId])
+  @@index([technicianId])
+  @@index([status])
+  @@index([categoryId])
+  @@map("service_requests")
+}
+
+// ---------------------------------------------------------------------------
+// 7. request_attachments 
+// ---------------------------------------------------------------------------
+
+model RequestAttachment {
+  id        BigInt   @id @default(autoincrement())
+  requestId BigInt   @map("request_id")
+  imageUrl  String   @map("image_url") @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  request ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@map("request_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// 8. ai_estimations 
+// ---------------------------------------------------------------------------
+
+model AiEstimation {
+  id               BigInt   @id @default(autoincrement())
+  serviceRequestId BigInt   @unique @map("service_request_id")
+  severity         Severity
+  minPrice         Decimal  @map("min_price") @db.Decimal(10, 2)
+  maxPrice         Decimal  @map("max_price") @db.Decimal(10, 2)
+  confidence       Decimal  @db.Decimal(5, 2)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+
+  @@map("ai_estimations")
+}
+
+// ---------------------------------------------------------------------------
+// 9. technician_offers 
+// ---------------------------------------------------------------------------
+
+model TechnicianOffer {
+  id               BigInt      @id @default(autoincrement())
+  serviceRequestId BigInt      @map("service_request_id")
+  technicianId     BigInt      @map("technician_id")
+  status           OfferStatus @default(PENDING)
+  acceptedAt       DateTime?   @map("accepted_at") @db.Timestamptz(6)
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  technician     User           @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceRequestId, technicianId])
+  @@index([technicianId])
+  @@index([status])
+  @@map("technician_offers")
+}
+
+// ---------------------------------------------------------------------------
+// 10. customer_reviews 
+// ---------------------------------------------------------------------------
+
+model CustomerReview {
+  id               BigInt   @id @default(autoincrement())
+  serviceRequestId BigInt   @unique @map("service_request_id")
+  customerId       BigInt   @map("customer_id")
+  technicianId     BigInt   @map("technician_id")
+  actualPaidPrice  Decimal  @map("actual_paid_price") @db.Decimal(10, 2)
+  punctuality      Int      @db.SmallInt
+  serviceQuality   Int      @map("service_quality") @db.SmallInt
+  professionalism  Int      @db.SmallInt
+  priceFairness    Int      @map("price_fairness") @db.SmallInt
+  rating           Decimal  @db.Decimal(3, 2)
+  comment          String?  @db.Text
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Restrict)
+  customer       User           @relation("CustomerReviewAuthor", fields: [customerId], references: [id], onDelete: Restrict)
+  technician     User           @relation("CustomerReviewSubject", fields: [technicianId], references: [id], onDelete: Restrict)
+
+  @@index([technicianId])
+  @@index([customerId])
+  @@index([actualPaidPrice])
+  @@map("customer_reviews")
+}
+
+// ---------------------------------------------------------------------------
+// 11. technician_reviews 
+// ---------------------------------------------------------------------------
+
+model TechnicianReview {
+  id               BigInt   @id @default(autoincrement())
+  serviceRequestId BigInt   @unique @map("service_request_id")
+  technicianId     BigInt   @map("technician_id")
+  customerId       BigInt   @map("customer_id")
+  rating           Int      @db.SmallInt
+  comment          String?  @db.Text
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Restrict)
+  technician     User           @relation("TechnicianReviewAuthor", fields: [technicianId], references: [id], onDelete: Restrict)
+  customer       User           @relation("TechnicianReviewSubject", fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@index([technicianId])
+  @@index([customerId])
+  @@map("technician_reviews")
 }
