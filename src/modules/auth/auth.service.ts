@@ -1,7 +1,9 @@
+import type { User } from "../../generated/prisma/client.js";
 import { prisma } from "../../core/prisma.js";
 import { ApiError } from "../../core/errors.js";
 import { isProduction } from "../../core/env.js";
 import { sendOtpSms } from "./auth.sms.js";
+import { issueTokens, verifyToken } from "./auth.tokens.js";
 
 // All the tuning knobs in one place, so nobody has to hunt for a magic number.
 const OTP_TTL_MINUTES = 5; // how long a code stays valid
@@ -71,11 +73,15 @@ export async function requestOtp(phone: string) {
 }
 
 /**
- * Step 2 of login: check the code, then hand back the user.
+ * Step 2 of login: check the code, then hand back the user and their tokens.
  *
  * If the phone has never been seen, a user row is created here with nothing
  * but the phone number - that is the "account" the app then asks to complete.
  * `isNewUser` tells the client whether to show onboarding or go straight in.
+ *
+ * The tokens are issued to a PENDING user as well, on purpose: onboarding
+ * itself (picking a role, submitting a profile) happens over authenticated
+ * endpoints, so the session has to start before the account is finished.
  */
 export async function verifyOtp(phone: string, otpCode: string) {
   const otp = await findLatestOtp(phone);
@@ -126,7 +132,52 @@ export async function verifyOtp(phone: string, otpCode: string) {
     data: { verifiedAt: now },
   });
 
-  return findOrCreateUserByPhone(phone);
+  const account = await findOrCreateUserByPhone(phone);
+
+  return { ...account, tokens: issueTokens(account.user.id) };
+}
+
+/**
+ * Trades a refresh token for a fresh pair, so a session can outlive its access
+ * token without sending another SMS.
+ *
+ * The user row is re-read here rather than trusted from the token - that is
+ * what stops a blocked or deleted account from renewing itself indefinitely.
+ * The account state comes back too, because a lot can have changed since the
+ * app last asked: an admin may have approved the technician who was waiting.
+ */
+export async function refreshSession(refreshToken: string) {
+  const userId = verifyToken(refreshToken, "refresh");
+
+  const user = await prisma.user.findFirst({
+    where: { id: userId, deletedAt: null },
+    include: { technicianProfile: true },
+  });
+
+  if (!user) {
+    throw ApiError.unauthorized("This account no longer exists");
+  }
+
+  assertAccountIsUsable(user);
+
+  return {
+    user,
+    technicianProfile: user.technicianProfile,
+    tokens: issueTokens(user.id),
+  };
+}
+
+/**
+ * Moderation, enforced in the one place every session passes through: login,
+ * refresh, and every authenticated request (see auth.middleware.ts).
+ *
+ * BLOCKED and SUSPENDED are the two statuses that revoke access. PENDING is
+ * not one of them - that is just an unfinished profile.
+ */
+export function assertAccountIsUsable(user: User) {
+  if (user.status === "BLOCKED" || user.status === "SUSPENDED") {
+    throw ApiError.forbidden(`This account is ${user.status.toLowerCase()}`);
+  }
 }
 
 /**
@@ -145,11 +196,7 @@ async function findOrCreateUserByPhone(phone: string) {
   });
 
   if (existing) {
-    if (existing.status === "BLOCKED" || existing.status === "SUSPENDED") {
-      throw ApiError.forbidden(
-        `This account is ${existing.status.toLowerCase()}`,
-      );
-    }
+    assertAccountIsUsable(existing);
 
     return {
       user: existing,

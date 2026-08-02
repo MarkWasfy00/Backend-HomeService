@@ -51,16 +51,30 @@ export const updateUserBody = z
     message: "Provide at least one field to update",
   });
 
+/**
+ * POST /customer/profile - screen 5a.
+ *
+ * The columns are nullable in the database because they are empty between the
+ * OTP and this screen; here they are all required, because this is the screen
+ * that fills them in.
+ *
+ * No `userId`: the profile always belongs to the caller, and the route reads
+ * that from the token with `currentUser(req)`. Accepting it as a field would
+ * let a customer write over somebody else's account.
+ */
+export const createCustomerProfileBody = z.object(profileFields);
+
 /** PATCH /admin/users/:id/status */
 export const updateUserStatusBody = z.object({
   status: z.enum(UserStatus),
 });
 
 /**
- * PATCH /public/onboarding/:id/role - the "customer or technician?" screen.
+ * PATCH /me/role - the "customer or technician?" screen.
  *
  * Only the two choices the screen actually offers. ADMIN is deliberately not
- * accepted: nobody may promote themselves to admin over a public endpoint.
+ * accepted: this endpoint acts on the caller's own account, so accepting it
+ * would let anyone promote themselves.
  */
 export const selectRoleBody = z.object({
   role: z.enum([UserRole.CUSTOMER, UserRole.TECHNICIAN]),
@@ -68,5 +82,8 @@ export const selectRoleBody = z.object({
 
 export type ListUsersQuery = z.infer<typeof listUsersQuery>;
 export type CreateUserBody = z.infer<typeof createUserBody>;
+export type CreateCustomerProfileBody = z.infer<
+  typeof createCustomerProfileBody
+>;
 export type UpdateUserBody = z.infer<typeof updateUserBody>;
 export type SelectRoleBody = z.infer<typeof selectRoleBody>;

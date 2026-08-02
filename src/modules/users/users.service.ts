@@ -4,6 +4,7 @@ import { prisma } from "../../core/prisma.js";
 import { ApiError } from "../../core/errors.js";
 import { skipTake } from "../../core/pagination.js";
 import type {
+  CreateCustomerProfileBody,
   CreateUserBody,
   ListUsersQuery,
   SelectRoleBody,
@@ -105,6 +106,30 @@ export async function selectRole(userId: bigint, role: SelectRoleBody["role"]) {
   const updated = await updateUserFields(userId, { role });
 
   return { user: updated, technicianProfile: null };
+}
+
+/**
+ * Screen 5a: the customer fills in the details that were left blank when their
+ * phone was verified. It does not create a user - that row exists already - it
+ * completes it, which is what turns `accountState` into READY.
+ *
+ * The details and `status: ACTIVE` are written in one update on purpose: a
+ * half-applied profile would leave an ACTIVE user with no name, or a complete
+ * user still stuck on the profile screen.
+ */
+export async function completeCustomerProfile(
+  userId: bigint,
+  data: CreateCustomerProfileBody,
+) {
+  const user = await getUserById(userId);
+
+  // The same guard selectRole uses. Without it this endpoint would reset a
+  // finished account's details, and re-activate a suspended one.
+  if (user.status !== "PENDING") {
+    throw ApiError.conflict("This account has already finished signing up");
+  }
+
+  return updateUserFields(userId, { ...data, status: "ACTIVE" });
 }
 
 export async function updateUser(id: bigint, data: UpdateUserBody) {

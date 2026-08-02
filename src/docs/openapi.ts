@@ -1,0 +1,831 @@
+import { createRequire } from "node:module";
+import { VerificationStatus } from "../generated/prisma/enums.js";
+import { paginationQuery } from "../core/pagination.js";
+import {
+  refreshBody,
+  requestOtpBody,
+  verifyOtpBody,
+} from "../modules/auth/auth.schema.js";
+import {
+  createCustomerProfileBody,
+  createUserBody,
+  listUsersQuery,
+  selectRoleBody,
+  updateUserBody,
+  updateUserStatusBody,
+} from "../modules/users/users.schema.js";
+import { createTechnicianProfileBody } from "../modules/technicians/technicians.schema.js";
+import {
+  dataOf,
+  fromZod,
+  idPathParam,
+  jsonBody,
+  jsonResponse,
+  listOf,
+  object,
+  queryParams,
+  responseRef,
+  responses,
+  schemaRef,
+  schemas,
+  securitySchemes,
+  withDescriptions,
+  withExamples,
+  type JsonSchema,
+} from "./openapi.components.js";
+
+/**
+ * The OpenAPI 3.1 description of this API, served as a Swagger page at `/docs`
+ * and as raw JSON at `/docs/openapi.json` (see docs.routes.ts).
+ *
+ * It is assembled in code rather than kept in a hand-written YAML file for one
+ * reason: **request bodies and query strings are generated from the same zod
+ * schemas the routes parse**. A field added to `createUserBody` appears on the
+ * docs page by itself, and a documented body the API would reject is
+ * impossible. Only the response shapes are written out by hand, next to the
+ * mapper they mirror - see openapi.components.ts.
+ *
+ * The layout below follows api/index.ts exactly, audience by audience, so the
+ * two can be read side by side.
+ */
+
+const { version } = createRequire(import.meta.url)("../../package.json") as {
+  version: string;
+};
+
+/** Marks an endpoint that exists in the route map but is not written yet. */
+function scaffolded(task: number) {
+  return `🔨 **Not built yet — returns \`501\`.** Intern task ${task}: the request and response documented here are the shape it will have once the handler is written. See \`docs/INTERN-TASKS.md\`.`;
+}
+
+/**
+ * Opts an operation out of the token requirement declared at the bottom of the
+ * document. Only the four `/public` endpoints and the two health checks use it,
+ * which is exactly the set that has no guard in api/index.ts.
+ */
+const openToAnyone: never[] = [];
+
+/**
+ * The `{ user, accountState, message }` block every onboarding endpoint answers
+ * with. The app reads `accountState` to decide which screen is next, and it is
+ * always computed by `resolveAccountState` - never by a route.
+ */
+function accountStateEnvelope(extra: Record<string, JsonSchema> = {}) {
+  return dataOf(
+    object({
+      user: schemaRef("User"),
+      ...extra,
+      accountState: schemaRef("AccountState"),
+      message: schemaRef("AccountStateMessage"),
+    }),
+  );
+}
+
+/**
+ * Examples for the fields the generator cannot invent anything sensible for, so
+ * "Try it out" starts from a body worth pressing Execute on. `+201000000002` is
+ * the seeded customer - see `npm run prisma:seed`.
+ */
+const phoneExample = "+201000000002";
+
+const profileExamples = {
+  fullName: "Mona Ali",
+  city: "Giza",
+  address: "12 Nile St",
+  latitude: 30.0131,
+  longitude: 31.2089,
+};
+
+const documentExamples = {
+  categoryId: "1",
+  nationalId: "/uploads/1712345678-national-id.jpg",
+  criminalRecordFile: "/uploads/1712345678-criminal-record.pdf",
+  profileImage: "/uploads/1712345678-photo.jpg",
+};
+
+/**
+ * Task 1 has not filled in `createCategoryBody` yet, so there is no zod schema
+ * to generate this from. These are the fields the TODO in categories.schema.ts
+ * asks for - delete them and use `fromZod(createCategoryBody)` once it exists.
+ */
+const plannedCategoryFields: Record<string, JsonSchema> = {
+  name: { type: "string", minLength: 2, maxLength: 100, example: "Plumbing" },
+  homeVisitBasePrice: {
+    description:
+      "Accepted as a number or a string, stored and returned as a string. Positive, at most 2 decimal places.",
+    anyOf: [{ type: "number" }, { type: "string" }],
+    example: "150.00",
+  },
+};
+
+const plannedCategoryBody = object(plannedCategoryFields);
+/** The same fields on PATCH, where all of them are optional. */
+const plannedCategoryPatchBody = object(plannedCategoryFields, []);
+
+/** Task 5, same story: `updateVerificationBody` is still empty. */
+const plannedVerificationBody: JsonSchema = object({
+  verificationStatus: {
+    type: "string",
+    description:
+      "`PENDING` is not a decision an admin can submit, so it is not accepted here.",
+    enum: [VerificationStatus.VERIFIED, VerificationStatus.REJECTED],
+  },
+});
+
+export const openApiDocument = {
+  openapi: "3.1.0",
+
+  info: {
+    title: "HomeService API",
+    version,
+    license: { name: "ISC", identifier: "ISC" },
+    description: [
+      "Phone-and-OTP login, onboarding for customers and technicians, and the back-office behind them.",
+      "",
+      "### Routes are grouped by audience",
+      "",
+      "| Prefix | Who it is for | Guard |",
+      "| --- | --- | --- |",
+      "| `/api/v1/public` | anyone | none |",
+      "| `/api/v1/me` | the caller, any role | `requireAuth` |",
+      '| `/api/v1/customer` | customers | `requireAuth` + `requireRole("CUSTOMER")` |',
+      '| `/api/v1/technician` | technicians | `requireAuth` + `requireRole("TECHNICIAN")` |',
+      '| `/api/v1/admin` | back-office | `requireAuth` + `requireRole("ADMIN")` |',
+      "",
+      "The guards are applied once per group in `src/api/index.ts`, and no route, service, schema or mapper checks permissions itself.",
+      "",
+      "### Getting a token",
+      "",
+      "1. `POST /api/v1/public/auth/request-otp` with your phone. There is no SMS provider yet, so the code comes back as `devOtpCode` and is printed by `npm run dev`.",
+      "2. `POST /api/v1/public/auth/verify-otp` with the code → `data.tokens.accessToken`.",
+      "3. Press **Authorize** above, paste the access token, and every call on this page carries it.",
+      "",
+      "Seeded accounts: `+201000000001` admin · `+201000000002` customer · `+201000000003` technician.",
+      "",
+      "### Every response has the same shape",
+      "",
+      "```jsonc",
+      '{ "data": { … } }                        // one object',
+      '{ "data": [ … ], "meta": { … } }         // a list, with pagination',
+      '{ "error": { "code": …, "message": … } } // any failure',
+      "```",
+      "",
+      "🔨 marks an endpoint that is scaffolded but not implemented yet - it answers `501` today.",
+    ].join("\n"),
+  },
+
+  // Relative, so "Try it out" hits whichever host is serving this page.
+  servers: [{ url: "/", description: "This server" }],
+
+  tags: [
+    { name: "Health", description: "Liveness checks, outside the API prefix." },
+    { name: "Auth", description: "Phone + OTP login. Open to anyone." },
+    { name: "Public", description: "Open endpoints used during onboarding." },
+    {
+      name: "Me",
+      description: "The caller's own account, whatever their role.",
+    },
+    { name: "Customer", description: "Customer-facing endpoints." },
+    { name: "Technician", description: "Technician-facing endpoints." },
+    { name: "Admin · Users", description: "Back-office user management." },
+    {
+      name: "Admin · Categories",
+      description: "Back-office category management.",
+    },
+    {
+      name: "Admin · Technicians",
+      description: "The approval queue for technician documents.",
+    },
+  ],
+
+  paths: {
+    // -----------------------------------------------------------------------
+    // Health - deliberately outside /api/v1 so monitoring can reach it without
+    // a version or a token.
+    // -----------------------------------------------------------------------
+    "/health": {
+      get: {
+        tags: ["Health"],
+        operationId: "health",
+        summary: "Is the process alive?",
+        security: openToAnyone,
+        responses: {
+          200: jsonResponse(
+            "The server is up.",
+            object({
+              status: { type: "string", example: "ok" },
+              uptime: {
+                type: "number",
+                description: "Seconds since the process started.",
+                example: 133.7,
+              },
+            }),
+          ),
+        },
+      },
+    },
+
+    "/health/db": {
+      get: {
+        tags: ["Health"],
+        operationId: "healthDatabase",
+        summary: "Can the server reach Postgres?",
+        description: "Runs `SELECT 1`. A failure surfaces as a `500`.",
+        security: openToAnyone,
+        responses: {
+          200: jsonResponse(
+            "The database answered.",
+            object({
+              status: { type: "string", example: "ok" },
+              database: { type: "string", example: "reachable" },
+            }),
+          ),
+        },
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // /api/v1/public/auth - how a user gets in, so it cannot require being in.
+    // -----------------------------------------------------------------------
+    "/api/v1/public/auth/request-otp": {
+      post: {
+        tags: ["Auth"],
+        operationId: "requestOtp",
+        summary: "Step 1 - text me a code",
+        description: [
+          "Sign-up and sign-in are the same call: we do not say whether the phone is registered.",
+          "",
+          "The code is valid 5 minutes and single use, there is a 60 second gap between resends, and 5 wrong guesses lock the phone for 15 minutes.",
+        ].join("\n"),
+        security: openToAnyone,
+        requestBody: jsonBody(
+          withExamples(fromZod(requestOtpBody), { phone: phoneExample }),
+        ),
+        responses: {
+          200: jsonResponse(
+            "A code was sent.",
+            dataOf(
+              object(
+                {
+                  expiresAt: {
+                    type: "string",
+                    format: "date-time",
+                    description: "When the code stops working.",
+                  },
+                  devOtpCode: {
+                    type: "string",
+                    description:
+                      "The code itself, so the team can test without an SMS provider - paste it into `otpCode` on verify-otp. Never present in production.",
+                    example: "042931",
+                  },
+                },
+                ["expiresAt"],
+              ),
+            ),
+          ),
+          400: responseRef("ValidationError"),
+          429: responseRef("TooManyRequests"),
+        },
+      },
+    },
+
+    "/api/v1/public/auth/verify-otp": {
+      post: {
+        tags: ["Auth"],
+        operationId: "verifyOtp",
+        summary: "Step 2 - here is the code, give me my tokens",
+        description: [
+          "A phone that has never been seen gets a user row here, holding nothing but the phone number - that is the account the onboarding screens then fill in.",
+          "",
+          "`isNewUser` tells the app whether to start onboarding; `accountState` tells it exactly which screen, including for a returning technician who is still waiting for approval.",
+          "",
+          '**`otpCode` must be the code from *your* step 1 - the example value below is a placeholder and always answers `Wrong code`.** Two more ways to get that same answer: sending a different `phone` than the one you asked with, or reusing an older code (only the newest code for a phone is checked, so asking twice retires the first one).',
+        ].join("\n"),
+        security: openToAnyone,
+        requestBody: jsonBody(
+          withDescriptions(
+            withExamples(fromZod(verifyOtpBody), {
+              phone: phoneExample,
+              otpCode: "000000",
+            }),
+            {
+              phone: "The same number you sent to /request-otp.",
+              otpCode:
+                "PLACEHOLDER - replace it with the `devOtpCode` from your own /request-otp response (also printed in the `npm run dev` terminal). Valid for 5 minutes, single use.",
+            },
+          ),
+        ),
+        responses: {
+          200: jsonResponse(
+            "Signed in.",
+            accountStateEnvelope({
+              isNewUser: {
+                type: "boolean",
+                description: "True when this call created the account.",
+              },
+              tokens: schemaRef("Tokens"),
+            }),
+          ),
+          400: responseRef("ValidationError"),
+          403: responseRef("Forbidden"),
+          429: responseRef("TooManyRequests"),
+        },
+      },
+    },
+
+    "/api/v1/public/auth/refresh": {
+      post: {
+        tags: ["Auth"],
+        operationId: "refreshSession",
+        summary: "Trade a refresh token for a fresh pair",
+        description: [
+          "Public because an expired access token is exactly the situation this exists for - demanding a valid one would be a deadlock. The refresh token in the body is the credential, and it is checked just as strictly.",
+          "",
+          "`accountState` comes back too: an admin may have approved the technician since the app last looked.",
+        ].join("\n"),
+        security: openToAnyone,
+        requestBody: jsonBody(fromZod(refreshBody)),
+        responses: {
+          200: jsonResponse(
+            "A new pair of tokens.",
+            accountStateEnvelope({ tokens: schemaRef("Tokens") }),
+          ),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+        },
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // The rest of /api/v1/public
+    // -----------------------------------------------------------------------
+    "/api/v1/public/categories": {
+      get: {
+        tags: ["Public"],
+        operationId: "listCategories",
+        summary: "🔨 List the service categories",
+        description: [
+          "The list customers and technicians pick from during onboarding. Open, because it is needed before anyone has an account. Not paginated - there are only a handful.",
+          "",
+          scaffolded(1),
+        ].join("\n\n"),
+        security: openToAnyone,
+        responses: {
+          200: jsonResponse(
+            "Every category, ordered by name.",
+            dataOf({ type: "array", items: schemaRef("Category") }),
+          ),
+          501: responseRef("NotImplemented"),
+        },
+      },
+    },
+
+    "/api/v1/public/uploads": {
+      post: {
+        tags: ["Public"],
+        operationId: "uploadFile",
+        summary: "🔨 Upload a file",
+        description: [
+          "Where the technician's national ID and criminal record go first: this returns a URL, and that URL is what `POST /api/v1/technician/profile` accepts - never the file itself.",
+          "",
+          "Planned limits: `image/jpeg`, `image/png` or `application/pdf`, at most 5 MB. The server renames every file, so the name the client sends is ignored.",
+          "",
+          scaffolded(4),
+        ].join("\n\n"),
+        security: openToAnyone,
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: object({
+                file: { type: "string", format: "binary" },
+              }),
+            },
+          },
+        },
+        responses: {
+          201: jsonResponse(
+            "Stored.",
+            dataOf(
+              object({
+                url: {
+                  type: "string",
+                  example: "/uploads/1712345678-national-id.jpg",
+                },
+              }),
+            ),
+          ),
+          400: responseRef("ValidationError"),
+          501: responseRef("NotImplemented"),
+        },
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // /api/v1/me - the caller's own account. No `:id` anywhere in this group:
+    // the id comes from the token.
+    // -----------------------------------------------------------------------
+    "/api/v1/me": {
+      get: {
+        tags: ["Me"],
+        operationId: "getMe",
+        summary: "Who am I, and which screen comes next?",
+        description:
+          "The same answer login gives, for an app that already has a token and is starting up again - it saves a trip through the SMS flow just to learn that a technician was approved.",
+        responses: {
+          200: jsonResponse(
+            "The caller's account.",
+            accountStateEnvelope({
+              technicianProfile: {
+                description: "Null for customers and admins.",
+                oneOf: [schemaRef("TechnicianProfile"), { type: "null" }],
+              },
+            }),
+          ),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+        },
+      },
+    },
+
+    "/api/v1/me/role": {
+      patch: {
+        tags: ["Me"],
+        operationId: "selectRole",
+        summary: 'The "customer or technician?" screen',
+        description: [
+          "The answer decides which screen comes next:",
+          "",
+          "- `CUSTOMER` → `COMPLETE_PROFILE`, the profile page",
+          "- `TECHNICIAN` → `SUBMIT_DOCUMENTS`, the documents form instead",
+          "",
+          "`ADMIN` is not accepted: this acts on the caller's own account, so allowing it would let anyone promote themselves. Answering again after onboarding has finished is a `409`.",
+        ].join("\n"),
+        requestBody: jsonBody(
+          withExamples(fromZod(selectRoleBody), { role: "TECHNICIAN" }),
+        ),
+        responses: {
+          200: jsonResponse("Role stored.", accountStateEnvelope()),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          404: responseRef("NotFound"),
+          409: responseRef("Conflict"),
+        },
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // /api/v1/customer
+    // -----------------------------------------------------------------------
+    "/api/v1/customer/profile": {
+      post: {
+        tags: ["Customer"],
+        operationId: "completeCustomerProfile",
+        summary: "Complete my customer profile",
+        description: [
+          "The twin of `POST /api/v1/technician/profile`. It does not create a user - that row exists from the moment the OTP was verified - it fills in the blanks and activates the account, which is what turns `accountState` into `READY`.",
+          "",
+          "There is no `userId` field: the profile belongs to the caller, taken from the token.",
+          "",
+          "Calling it again once onboarding has finished is a `409`: the account is no longer `PENDING`.",
+        ].join("\n\n"),
+        requestBody: jsonBody(
+          withExamples(fromZod(createCustomerProfileBody), profileExamples),
+        ),
+        responses: {
+          201: jsonResponse("Profile completed.", accountStateEnvelope()),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+          404: responseRef("NotFound"),
+          409: responseRef("Conflict"),
+        },
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // /api/v1/technician
+    // -----------------------------------------------------------------------
+    "/api/v1/technician/profile": {
+      post: {
+        tags: ["Technician"],
+        operationId: "createTechnicianProfile",
+        summary: "Submit my details and documents",
+        description: [
+          "A technician never sees the customer profile page, so this one call carries their personal details *and* their national ID / criminal record, and creates the TechnicianProfile row.",
+          "",
+          "Upload the files first with `POST /api/v1/public/uploads` and send the URLs it returns. The account then sits in `WAITING_FOR_APPROVAL` until an admin verifies it - the user's status stays `PENDING` on purpose.",
+        ].join("\n"),
+        requestBody: jsonBody(
+          withExamples(fromZod(createTechnicianProfileBody), {
+            ...profileExamples,
+            ...documentExamples,
+          }),
+        ),
+        responses: {
+          201: jsonResponse(
+            "Documents submitted, now waiting for an admin.",
+            accountStateEnvelope({
+              technicianProfile: schemaRef("TechnicianProfile"),
+            }),
+          ),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+          404: responseRef("NotFound"),
+          409: responseRef("Conflict"),
+        },
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // /api/v1/admin/users
+    // -----------------------------------------------------------------------
+    "/api/v1/admin/users": {
+      get: {
+        tags: ["Admin · Users"],
+        operationId: "listUsers",
+        summary: "List users",
+        description: "Newest first. Soft-deleted users are never returned.",
+        parameters: queryParams(listUsersQuery, {
+          page: "1-based page number.",
+          limit: "Rows per page, at most 100.",
+          role: "Only this role.",
+          status: "Only this status.",
+          city: "Exact city, case-insensitive.",
+          search: "Matches the full name or the phone.",
+        }),
+        responses: {
+          200: jsonResponse("One page of users.", listOf(schemaRef("User"))),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+        },
+      },
+
+      post: {
+        tags: ["Admin · Users"],
+        operationId: "createUser",
+        summary: "Create a user",
+        description:
+          "The back-office way in. Normal users are created by verifying an OTP, not here. A phone that already exists is a `409`.",
+        requestBody: jsonBody(
+          withExamples(fromZod(createUserBody), {
+            ...profileExamples,
+            phone: "+201112223334",
+          }),
+        ),
+        responses: {
+          201: jsonResponse("Created.", dataOf(schemaRef("User"))),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+          409: responseRef("Conflict"),
+        },
+      },
+    },
+
+    "/api/v1/admin/users/{id}": {
+      parameters: [idPathParam("User id.")],
+
+      get: {
+        tags: ["Admin · Users"],
+        operationId: "getUser",
+        summary: "One user",
+        responses: {
+          200: jsonResponse("The user.", dataOf(schemaRef("User"))),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+          404: responseRef("NotFound"),
+        },
+      },
+
+      patch: {
+        tags: ["Admin · Users"],
+        operationId: "updateUser",
+        summary: "Update a user's details",
+        description:
+          "Profile fields only - role and status have their own endpoints. Send at least one field; an empty body is a `400`.",
+        requestBody: jsonBody(
+          withExamples(fromZod(updateUserBody), profileExamples),
+        ),
+        responses: {
+          200: jsonResponse("Updated.", dataOf(schemaRef("User"))),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+          404: responseRef("NotFound"),
+          409: responseRef("Conflict"),
+        },
+      },
+
+      delete: {
+        tags: ["Admin · Users"],
+        operationId: "deleteUser",
+        summary: "Soft delete a user",
+        description:
+          "Sets `deleted_at`; the row stays for history. Every later query filters it out, so the user disappears from the API.",
+        responses: {
+          204: { description: "Deleted. No body." },
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+          404: responseRef("NotFound"),
+        },
+      },
+    },
+
+    "/api/v1/admin/users/{id}/status": {
+      parameters: [idPathParam("User id.")],
+
+      patch: {
+        tags: ["Admin · Users"],
+        operationId: "setUserStatus",
+        summary: "Activate, block or suspend",
+        description:
+          "`BLOCKED` and `SUSPENDED` take effect within one access-token lifetime: the guard re-reads the user row on every request, and refreshing re-checks it too, so the session cannot be renewed.",
+        requestBody: jsonBody(
+          withExamples(fromZod(updateUserStatusBody), { status: "ACTIVE" }),
+        ),
+        responses: {
+          200: jsonResponse("Updated.", dataOf(schemaRef("User"))),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+          404: responseRef("NotFound"),
+        },
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // /api/v1/admin/categories - task 1
+    // -----------------------------------------------------------------------
+    "/api/v1/admin/categories": {
+      post: {
+        tags: ["Admin · Categories"],
+        operationId: "createCategory",
+        summary: "🔨 Create a category",
+        description: [
+          "`name` is unique, so a duplicate is a `409` on its own - no need to look first.",
+          "",
+          scaffolded(1),
+        ].join("\n\n"),
+        requestBody: jsonBody(plannedCategoryBody),
+        responses: {
+          201: jsonResponse("Created.", dataOf(schemaRef("Category"))),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+          409: responseRef("Conflict"),
+          501: responseRef("NotImplemented"),
+        },
+      },
+    },
+
+    "/api/v1/admin/categories/{id}": {
+      parameters: [idPathParam("Category id.")],
+
+      get: {
+        tags: ["Admin · Categories"],
+        operationId: "getCategory",
+        summary: "🔨 One category",
+        description: scaffolded(1),
+        responses: {
+          200: jsonResponse("The category.", dataOf(schemaRef("Category"))),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+          404: responseRef("NotFound"),
+          501: responseRef("NotImplemented"),
+        },
+      },
+
+      patch: {
+        tags: ["Admin · Categories"],
+        operationId: "updateCategory",
+        summary: "🔨 Update a category",
+        description: [
+          "The same fields as create, all optional, but an empty body is a `400`.",
+          "",
+          scaffolded(1),
+        ].join("\n\n"),
+        requestBody: jsonBody(plannedCategoryPatchBody),
+        responses: {
+          200: jsonResponse("Updated.", dataOf(schemaRef("Category"))),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+          404: responseRef("NotFound"),
+          409: responseRef("Conflict"),
+          501: responseRef("NotImplemented"),
+        },
+      },
+
+      delete: {
+        tags: ["Admin · Categories"],
+        operationId: "deleteCategory",
+        summary: "🔨 Delete a category",
+        description: [
+          "A real delete - `Category` has no `deleted_at`. Deleting one that technicians or service requests still point at is a `409`, and that is the correct answer.",
+          "",
+          scaffolded(1),
+        ].join("\n\n"),
+        responses: {
+          204: { description: "Deleted. No body." },
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+          404: responseRef("NotFound"),
+          409: responseRef("Conflict"),
+          501: responseRef("NotImplemented"),
+        },
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // /api/v1/admin/technicians - task 5, the approval queue
+    // -----------------------------------------------------------------------
+    "/api/v1/admin/technicians": {
+      get: {
+        tags: ["Admin · Technicians"],
+        operationId: "listTechnicians",
+        summary: "🔨 The approval queue",
+        description: [
+          "Technician profiles, newest first, with their user and category included. Filter by `verificationStatus=PENDING` to see only the ones waiting.",
+          "",
+          "This is the admin shape, so it carries the identity documents.",
+          "",
+          scaffolded(5),
+        ].join("\n\n"),
+        parameters: [
+          ...queryParams(paginationQuery, {
+            page: "1-based page number.",
+            limit: "Rows per page, at most 100.",
+          }),
+          {
+            name: "verificationStatus",
+            in: "query",
+            required: false,
+            description: "Planned filter (task 5).",
+            schema: {
+              type: "string",
+              enum: Object.values(VerificationStatus),
+            },
+          },
+        ],
+        responses: {
+          200: jsonResponse(
+            "One page of technician profiles.",
+            listOf(schemaRef("TechnicianProfileAdmin")),
+          ),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+          501: responseRef("NotImplemented"),
+        },
+      },
+    },
+
+    "/api/v1/admin/technicians/{id}/verification": {
+      parameters: [idPathParam("Technician **profile** id, not the user id.")],
+
+      patch: {
+        tags: ["Admin · Technicians"],
+        operationId: "setTechnicianVerification",
+        summary: "🔨 Approve or reject a technician",
+        description: [
+          'The other half of "waiting for approval". Two rows change together:',
+          "",
+          "- `VERIFIED` → the profile is verified **and** the user becomes `ACTIVE`, which is what turns `accountState` into `READY` and lets them work.",
+          "- `REJECTED` → the profile is rejected and the user stays `PENDING`, so they can submit again.",
+          "",
+          scaffolded(5),
+        ].join("\n"),
+        requestBody: jsonBody(plannedVerificationBody),
+        responses: {
+          200: jsonResponse(
+            "Decision recorded.",
+            dataOf(schemaRef("TechnicianProfileAdmin")),
+          ),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
+          404: responseRef("NotFound"),
+          501: responseRef("NotImplemented"),
+        },
+      },
+    },
+  },
+
+  components: { schemas, responses, securitySchemes },
+
+  /**
+   * The default for the whole document: a token is required. The handful of
+   * endpoints that do not need one say `security: openToAnyone` above, which
+   * is the same split api/index.ts makes - `/public` and the health checks have
+   * no guard, everything else is behind `requireAuth`.
+   */
+  security: [{ bearerAuth: [] }],
+};

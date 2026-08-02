@@ -1,5 +1,13 @@
 import { Router } from "express";
-import { ApiError } from "../../core/errors.js";
+import { currentUser } from "../auth/auth.middleware.js";
+import { toUserResponse } from "../users/users.mapper.js";
+import {
+  accountStateMessage,
+  resolveAccountState,
+} from "../users/users.state.js";
+import { toTechnicianProfileResponse } from "./technicians.mapper.js";
+import { createTechnicianProfileBody } from "./technicians.schema.js";
+import * as techniciansService from "./technicians.service.js";
 
 /**
  * TASK 3 - screen 5b: the technician submits their details and documents,
@@ -17,24 +25,29 @@ import { ApiError } from "../../core/errors.js";
 export const techniciansTechnicianRoutes = Router();
 
 /** POST /api/v1/technician/profile */
-techniciansTechnicianRoutes.post("/", async (_req, res) => {
-  // TODO(task 3):
-  //   const body = createTechnicianProfileBody.parse(req.body);
-  //   const profile = await techniciansService.createTechnicianProfile(body);
-  //
-  // Then reply 201 with the profile AND the account state, so the app can go
-  // straight to the "waiting for approval" screen without a second call:
-  //
-  //   res.status(201).json({
-  //     data: {
-  //       technicianProfile: toTechnicianProfileResponse(profile),
-  //       accountState: "WAITING_FOR_APPROVAL",
-  //       message: accountStateMessage.WAITING_FOR_APPROVAL,
-  //     },
-  //   });
-  //
-  // Import both from modules/users/users.state.js. Better still, call
-  // resolveAccountState(user, profile) with the updated user so there is only
-  // one place that decides the state.
-  throw ApiError.notImplemented();
+techniciansTechnicianRoutes.post("/", async (req, res) => {
+  const body = createTechnicianProfileBody.parse(req.body);
+
+  // Whose profile this is comes from the token, never from the body - the
+  // group is already behind requireAuth + requireRole("TECHNICIAN").
+  const { user, technicianProfile } =
+    await techniciansService.createTechnicianProfile(
+      currentUser(req).id,
+      body,
+    );
+
+  // resolveAccountState decides this, never the route - the same function the
+  // login response uses, so the app gets the identical answer either way. It
+  // comes back with the profile so the "under review" screen can be shown
+  // straight away, without a second call.
+  const accountState = resolveAccountState(user, technicianProfile);
+
+  res.status(201).json({
+    data: {
+      user: toUserResponse(user),
+      technicianProfile: toTechnicianProfileResponse(technicianProfile),
+      accountState,
+      message: accountStateMessage[accountState],
+    },
+  });
 });

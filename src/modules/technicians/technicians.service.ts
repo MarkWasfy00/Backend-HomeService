@@ -1,3 +1,4 @@
+import { prisma } from "../../core/prisma.js";
 import { ApiError } from "../../core/errors.js";
 import type {
   CreateTechnicianProfileBody,
@@ -9,40 +10,80 @@ import type {
 // Reference: src/modules/users/users.service.ts.
 
 /**
- * TASK 3 - the technician submits their details and documents in one go.
+ * The technician submits their details and documents in one go.
  *
- * Two rows change together, so they must both succeed or both fail. Wrap them
- * in `prisma.$transaction(async (tx) => { ... })`:
+ * Two rows change together and must not half-happen, so both live in one
+ * transaction:
  *
- *   1. tx.user.update - write fullName / city / address / latitude / longitude
- *      (the details a customer would enter on the profile page) and set
- *      `role: "TECHNICIAN"`
- *   2. tx.technicianProfile.create - categoryId, nationalId,
- *      criminalRecordFile, profileImage, `verificationStatus: "PENDING"`
+ *   1. the personal details land on the User row (the same five a customer
+ *      would type on the profile page), along with `role: TECHNICIAN`
+ *   2. the TechnicianProfile row is created with the documents, PENDING
  *
- * Leave the user's `status` as PENDING. That combination - role TECHNICIAN,
- * verificationStatus PENDING - is what makes the app show "waiting for
- * approval"; see resolveAccountState in modules/users/users.state.ts.
+ * The user's `status` deliberately stays PENDING: role TECHNICIAN plus
+ * verificationStatus PENDING is what makes the app show "waiting for approval"
+ * - see resolveAccountState in modules/users/users.state.ts. Only an admin
+ * (task 5) can move them on.
  *
- * Things to get right:
- *   - `userId` is unique on TechnicianProfile, so submitting twice raises
- *     P2002 -> 409 on its own. Good: it stops double submissions.
- *   - Check the user exists and is not soft-deleted before you start.
- *   - A bad `categoryId` raises P2003 -> 409.
- *   - Return the updated user as well as the profile, so the route can call
- *     resolveAccountState(user, profile) instead of hardcoding the state.
+ * Returns the updated user as well as the profile so the route can hand both
+ * to resolveAccountState instead of hardcoding the state.
  */
 export async function createTechnicianProfile(
+  userId: bigint,
   data: CreateTechnicianProfileBody,
 ) {
-  // TODO(task 3)
-  throw ApiError.notImplemented();
+  const user = await prisma.user.findFirst({
+    where: { id: userId, deletedAt: null },
+  });
+
+  // `tx.user.update` cannot express the soft-delete filter, so the check
+  // happens here - a deleted user must not be resurrected as a technician.
+  if (!user) {
+    throw ApiError.notFound("User not found");
+  }
+
+  // The same guard selectRole uses. Without it an account that already
+  // finished signing up as a customer would be silently turned into a
+  // technician and pushed back to the waiting screen.
+  if (user.status !== "PENDING") {
+    throw ApiError.conflict("This account has already finished signing up");
+  }
+
+  // Submitting twice hits the unique index on userId (P2002 -> 409), and an
+  // unknown categoryId hits the foreign key (P2003 -> 409). Neither needs a
+  // check up front; the error handler turns both into the right response.
+  return prisma.$transaction(async (tx) => {
+    const updatedUser = await tx.user.update({
+      where: { id: userId },
+      data: {
+        fullName: data.fullName,
+        city: data.city,
+        address: data.address,
+        latitude: data.latitude,
+        longitude: data.longitude,
+        // Already TECHNICIAN from the role screen; setting it again is
+        // harmless and keeps this endpoint correct on its own.
+        role: "TECHNICIAN",
+      },
+    });
+
+    const technicianProfile = await tx.technicianProfile.create({
+      data: {
+        userId,
+        categoryId: data.categoryId,
+        nationalId: data.nationalId,
+        criminalRecordFile: data.criminalRecordFile,
+        profileImage: data.profileImage,
+        verificationStatus: "PENDING",
+      },
+    });
+
+    return { user: updatedUser, technicianProfile };
+  });
 }
 
 /** The profile belonging to a user, or null. Used to build the account state. */
 export async function findTechnicianProfileByUserId(userId: bigint) {
-  // TODO(task 3): prisma.technicianProfile.findUnique({ where: { userId } })
-  throw ApiError.notImplemented();
+  return prisma.technicianProfile.findUnique({ where: { userId } });
 }
 
 /**

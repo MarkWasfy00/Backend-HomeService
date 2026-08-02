@@ -10,6 +10,16 @@ const envSchema = z.object({
     .default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().min(1),
+
+  // Signs and verifies every JWT. Changing it logs everyone out, which is the
+  // only "revoke all sessions" button this app has - see auth.tokens.ts.
+  // Generate one with: node -e "console.log(crypto.randomUUID()+crypto.randomUUID())"
+  JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
+
+  // Short, because an access token cannot be revoked before it expires.
+  ACCESS_TOKEN_TTL_MINUTES: z.coerce.number().int().positive().default(15),
+  // Long, because the alternative is sending another SMS.
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -10,9 +10,9 @@ serves each screen, and which ones are still to be built.
 | 1 | Enter phone                   | `POST /api/v1/public/auth/request-otp` | ✅ done |
 | 2 | Enter the 6-digit code        | `POST /api/v1/public/auth/verify-otp`  | ✅ done |
 | 3 | Pick a field (plumbing, …)    | `GET /api/v1/public/categories`        | 🔨 task 1 |
-| 4 | "Customer or technician?"     | `PATCH /api/v1/public/onboarding/:id/role` | ✅ done |
-| 5a| Customer → profile page       | `POST /api/v1/customer/profile`        | 🔨 task 2 |
-| 5b| Technician → documents form   | `POST /api/v1/technician/profile`      | 🔨 task 3 |
+| 4 | "Customer or technician?"     | `PATCH /api/v1/me/role`                | ✅ done |
+| 5a| Customer → profile page       | `POST /api/v1/customer/profile`        | ✅ done |
+| 5b| Technician → documents form   | `POST /api/v1/technician/profile`      | ✅ done |
 |   | ↳ the file upload itself      | `POST /api/v1/public/uploads`          | 🔨 task 4 |
 |   | Admin approves the technician | `PATCH /api/v1/admin/technicians/:id/verification` | 🔨 task 5 |
 
@@ -28,6 +28,12 @@ and write the body. Follow the `TODO(task N)` comments — each one names the
 Prisma call and the traps.
 
 ## Three decisions that keep this simple
+
+Everything from step 4 on runs behind a token. `verify-otp` issues one to a
+PENDING user precisely so the rest of onboarding can be authenticated: each of
+those steps acts on *the caller*, so none of them takes a `userId` — the id
+comes from the token via `currentUser(req)`. See the Authentication section of
+the README.
 
 **1. The user row is created at step 2, with nothing but a phone.**
 
@@ -89,8 +95,8 @@ creates the `TechnicianProfile` row. You do not have to build it.
 
 **2. Step 4 splits the flow in two, and the choice is saved.**
 
-`PATCH /public/onboarding/:id/role` stores the answer and replies with the
-state that tells the app where to go:
+`PATCH /me/role` stores the answer and replies with the state that tells the
+app where to go:
 
 ```
 selects CUSTOMER    → COMPLETE_PROFILE   app opens, land on the profile page
@@ -105,8 +111,9 @@ resume exactly where they stopped instead of starting over.
 
 The role is locked once onboarding finishes (409 after documents are submitted,
 or once the account is ACTIVE) — otherwise a technician could flip to customer
-and strand their profile, offers and reviews. `ADMIN` is rejected outright:
-nobody promotes themselves over a public endpoint.
+and strand their profile, offers and reviews. `ADMIN` is rejected outright: the
+schema does not accept it, so nobody promotes themselves by calling their own
+account endpoint.
 
 **The technician form is the customer form plus documents.** Because a
 technician skips the profile page, `POST /technician/profile` collects the same
@@ -153,9 +160,8 @@ Both reply with the same envelope, so the app can handle them with one code path
 The technician response also carries `technicianProfile`.
 
 ```jsonc
-// POST /api/v1/customer/profile
+// POST /api/v1/customer/profile     Authorization: Bearer <accessToken>
 {
-  "userId": "12",
   "fullName": "Mona Ali",
   "city": "Giza",
   "address": "12 Nile St",
@@ -163,9 +169,8 @@ The technician response also carries `technicianProfile`.
   "longitude": 31.2089
 }
 
-// POST /api/v1/technician/profile  — the same five, plus four
+// POST /api/v1/technician/profile  — the same five, plus three
 {
-  "userId": "13",
   "fullName": "Karim Fathy",
   "city": "Cairo",
   "address": "5 Tahrir",
@@ -179,8 +184,9 @@ The technician response also carries `technicianProfile`.
 }
 ```
 
-`userId` in the body is temporary — with JWT it comes from the token and both
-URLs lose it entirely.
+Neither body carries a `userId`: the profile always belongs to the caller, and
+the route reads that from the token. Accepting one as a field would let a user
+file a profile against somebody else's account.
 
 **3. The category picked at step 3 is only stored for technicians.**
 
@@ -198,7 +204,9 @@ So step 3 is a plain read — list the categories so the user can pick one.
 ```
 POST  /api/v1/public/auth/request-otp     { phone }
 POST  /api/v1/public/auth/verify-otp      { phone, otpCode }
-PATCH /api/v1/public/onboarding/:id/role  { role: "CUSTOMER" | "TECHNICIAN" }
+POST  /api/v1/public/auth/refresh         { refreshToken }
+GET   /api/v1/me                          who am I + accountState
+PATCH /api/v1/me/role                     { role: "CUSTOMER" | "TECHNICIAN" }
 ```
 
 Rules baked into `src/modules/auth/auth.service.ts` (all the numbers are named
@@ -207,7 +215,12 @@ constants at the top of that file):
 - code is 6 digits, valid for **5 minutes**, single use
 - **60 seconds** between resends
 - **5** wrong guesses locks the phone for **15 minutes**
-- `BLOCKED`/`SUSPENDED` users cannot log in
+- `BLOCKED`/`SUSPENDED` users cannot log in, refresh, or use an existing token
+
+`verify-otp` also hands out the JWTs everything else needs — access (15 min)
+and refresh (30 days). The guards that check them live in
+`src/modules/auth/auth.middleware.ts` and are applied per audience group in
+`src/api/index.ts`; the README has the full picture.
 
 There is no SMS provider yet. The code is printed in the `npm run dev` terminal
 and returned as `devOtpCode` in the response, which is stripped in production.
@@ -224,7 +237,7 @@ with every file created, every function named, and every body left empty:
 ```
 src/modules/categories/     task 1    schema · service · mapper · public+admin routes
 src/modules/users/
-  users.customer.routes.ts  task 2
+  users.customer.routes.ts  task 2 ✅ done
 src/modules/technicians/    tasks 3+5 schema · service · mapper · technician+admin routes
 src/modules/uploads/        task 4    public routes
 ```
@@ -263,13 +276,13 @@ DELETE /api/v1/admin/categories/:id
   (`price.toString()`), never a float.
 - Mount the public list in `src/api/public.ts`, the rest in `src/api/admin.ts`.
 
-## Task 2 — Customer creates their profile
+## Task 2 — Customer creates their profile ✅ done
 
 Screen 5a. Turns a phone-only row into a usable account.
 
 ```
-POST /api/v1/customer/profile
-  { userId, fullName, city, address, latitude, longitude }
+POST /api/v1/customer/profile        Authorization: Bearer <accessToken>
+  { fullName, city, address, latitude, longitude }
 ```
 
 - All five profile fields are required here, even though the columns are
@@ -284,18 +297,20 @@ POST /api/v1/customer/profile
 - `users.service.ts` already has almost all of this — reuse `updateUserFields`
   rather than writing new Prisma calls.
 
-> `userId` in the body is temporary. With JWT it becomes `POST /me/profile`
-> and the id comes from the token. Keep the logic in the service so that swap
-> is a two-line change.
+> No `userId` in the body: the group is behind `requireAuth` +
+> `requireRole("CUSTOMER")`, so the caller is already known. Read them with
+> `currentUser(req)` from `modules/auth/auth.middleware.js` and pass the id to
+> the service — the technician twin does exactly this.
 
-## Task 3 — Technician submits documents
+## Task 3 — Technician submits documents ✅ done
 
-Screen 5b. Depends on task 4 for the file URLs.
+Screen 5b. Kept here as the worked example for task 2 — it is the same shape,
+and it shows where the caller's id comes from. Still depends on task 4 for the
+file URLs themselves.
 
 ```
-POST /api/v1/technician/profile
-  { userId,
-    fullName, city, address, latitude, longitude,   ← same as the customer form
+POST /api/v1/technician/profile      Authorization: Bearer <accessToken>
+  { fullName, city, address, latitude, longitude,   ← same as the customer form
     categoryId, nationalId, criminalRecordFile?, profileImage? }
 ```
 

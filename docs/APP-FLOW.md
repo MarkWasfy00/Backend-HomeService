@@ -5,10 +5,10 @@ do with the answer.
 
 Base URL: `http://localhost:3000/api/v1`
 
-> **No auth yet.** No token, no headers — just `content-type: application/json`.
-> Once JWT lands, every call below gets an `Authorization: Bearer …` header and
-> the `userId` fields disappear (the server reads them from the token). Nothing
-> else about the flow changes.
+> **Auth.** Screens 1 and 2 are open. From screen 3 on, every call carries
+> `Authorization: Bearer <accessToken>` — the token you got from `verify-otp`.
+> No endpoint takes a `userId`: the server reads who you are from the token, so
+> sending one would be ignored anyway. See [Tokens](#tokens) at the bottom.
 
 ## The whole journey
 
@@ -20,7 +20,7 @@ Base URL: `http://localhost:3000/api/v1`
   ┌─────────────────┐
   │ 2. Enter code   │  POST /public/auth/verify-otp
   └────────┬────────┘
-           │  → returns accountState, which decides everything below
+           │  → returns tokens + accountState, which decides everything below
            ▼
   ┌─────────────────┐
   │ 3. Pick a field │  GET /public/categories
@@ -28,7 +28,7 @@ Base URL: `http://localhost:3000/api/v1`
   └────────┬────────┘
            ▼
   ┌─────────────────────────┐
-  │ 4. Customer or          │  PATCH /public/onboarding/:userId/role
+  │ 4. Customer or          │  PATCH /me/role
   │    technician?          │
   └───┬─────────────────┬───┘
       │ CUSTOMER        │ TECHNICIAN
@@ -85,12 +85,22 @@ POST /public/auth/verify-otp
               "status": "PENDING", "fullName": null, … },
     "isNewUser": true,
     "accountState": "COMPLETE_PROFILE",
-    "message": "Please complete your profile"
+    "message": "Please complete your profile",
+    "tokens": {
+      "tokenType": "Bearer",
+      "accessToken": "eyJhbGciOiJIUzI1NiIs…",
+      "expiresIn": 900,                       // seconds
+      "refreshToken": "eyJhbGciOiJIUzI1NiIs…",
+      "refreshExpiresIn": 2592000
+    }
   }
 }
 ```
 
-**Store `user.id`** — every call after this needs it (until JWT).
+**Store both tokens** — in the keychain / encrypted store, not in plain
+preferences. The access token goes on every later call; the refresh token is
+only ever sent to `/public/auth/refresh`. You do not need to store `user.id`
+for API calls any more, only for display: the server reads it from the token.
 
 **Then route on `accountState`, not on `isNewUser`.** See the table at the
 bottom; it is the same logic every time the app opens.
@@ -125,7 +135,8 @@ GET /public/categories
 ## Screen 4 — Customer or technician?
 
 ```http
-PATCH /public/onboarding/12/role
+PATCH /me/role
+Authorization: Bearer <accessToken>
 { "role": "TECHNICIAN" }
 ```
 
@@ -156,7 +167,8 @@ screen, and a technician never on the customer profile page.
 
 ```http
 POST /customer/profile
-{ "userId": "12", "fullName": "Mona Ali", "city": "Giza",
+Authorization: Bearer <accessToken>
+{ "fullName": "Mona Ali", "city": "Giza",
   "address": "12 Nile St", "latitude": 30.0131, "longitude": 31.2089 }
 ```
 
@@ -186,8 +198,8 @@ jpeg / png / pdf, max 5 MB. Call it once per file.
 
 ```http
 POST /technician/profile
-{ "userId": "13",
-  "fullName": "Karim Fathy", "city": "Cairo", "address": "5 Tahrir",
+Authorization: Bearer <accessToken>
+{ "fullName": "Karim Fathy", "city": "Cairo", "address": "5 Tahrir",
   "latitude": 30.0444, "longitude": 31.2357,
 
   "categoryId": "1",                              // from screen 3
@@ -214,21 +226,29 @@ the waiting screen instead.
 
 ## The waiting screen
 
-There is nothing to call. A technician stays here until an admin approves them.
+A technician stays here until an admin approves them. To find out when that
+happens:
 
-To find out when that happens, either:
+```http
+GET /me
+Authorization: Bearer <accessToken>
+```
 
-- **log in again** (screens 1–2) and read the new `accountState`, or
-- wait for a push notification, once that is built.
+```jsonc
+{ "data": { "user": { … }, "technicianProfile": { … },
+            "accountState": "WAITING_FOR_APPROVAL", "message": "…" } }
+```
 
-Don't poll `verify-otp` on a timer — it sends a real SMS each time and the
-60-second cooldown will start returning `429`.
+Poll that on pull-to-refresh or a slow timer, or wait for a push notification
+once that is built. **Never poll `verify-otp`** — it sends a real SMS each time
+and the 60-second cooldown will start returning `429`.
 
 ---
 
 ## When the app opens — the only routing table you need
 
-After `verify-otp`, switch on `accountState`:
+With a stored token, call `GET /me`; without one, run screens 1–2. Either way
+you get an `accountState` — switch on it:
 
 | `accountState` | Screen | Why |
 | --- | --- | --- |
@@ -264,7 +284,8 @@ If a new state appears later, this table is the only thing that changes.
 | Status | Meaning |
 | --- | --- |
 | `400` | bad input — `details` lists the offending fields |
-| `403` | account blocked or suspended |
+| `401` | no token, or it expired — refresh, then retry once |
+| `403` | wrong audience for this endpoint, or the account is blocked/suspended |
 | `404` | no such record |
 | `409` | duplicate, or an action that no longer applies |
 | `429` | too many OTP requests or wrong guesses |
@@ -276,6 +297,48 @@ that don't fit in a JavaScript number — keep them as strings end to end.
 
 **Money is a string** too (`"150.00"`). Never parse it into a float.
 
+## Tokens
+
+`verify-otp` hands back an access token and a refresh token. Put the access
+token on every call outside `/public`:
+
+```http
+Authorization: Bearer <accessToken>
+```
+
+It lasts 15 minutes. When it runs out you get:
+
+```jsonc
+// 401
+{ "error": { "code": "unauthorized", "message": "Your session has expired, refresh it" } }
+```
+
+Trade the refresh token for a new pair — no SMS, no login screen:
+
+```http
+POST /public/auth/refresh
+{ "refreshToken": "eyJhbGciOiJIUzI1NiIs…" }
+```
+
+```jsonc
+// 200 — same shape as verify-otp, minus isNewUser
+{ "data": { "user": { … }, "accountState": "READY", "message": "…",
+            "tokens": { "accessToken": "…", "refreshToken": "…", … } } }
+```
+
+**Store the new pair and drop the old one.** Do this in one place — an
+interceptor that catches a `401`, refreshes, and replays the request once. If
+the refresh itself fails (`401`, or `403` for a blocked account), clear both
+tokens and send the user back to screen 1.
+
+Two things worth knowing:
+
+- **The refresh response carries a fresh `accountState`.** An admin may have
+  approved the waiting technician since the app last looked, so route on it the
+  same way you do after login.
+- **A blocked account stops working within 15 minutes**, and cannot refresh at
+  all — both return `403 "This account is blocked"`.
+
 ## What is live today
 
 Working now:
@@ -283,7 +346,11 @@ Working now:
 ```
 POST  /public/auth/request-otp
 POST  /public/auth/verify-otp
-PATCH /public/onboarding/:userId/role
+POST  /public/auth/refresh
+GET   /me
+PATCH /me/role
+POST  /customer/profile             screen 5a
+POST  /technician/profile           screen 5b (the upload it feeds on is not)
       + the whole /admin/users section
 ```
 
@@ -293,8 +360,6 @@ you can wire the app up against them now:
 ```
 GET   /public/categories            screen 3
 POST  /public/uploads               screen 5b
-POST  /customer/profile             screen 5a
-POST  /technician/profile           screen 5b
 GET   /admin/technicians            back-office approval queue
 PATCH /admin/technicians/:id/verification
       + /admin/categories

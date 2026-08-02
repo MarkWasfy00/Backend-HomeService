@@ -1,40 +1,45 @@
 import { z } from "zod";
-import { idParams } from "../../core/fields.js";
+import { idField, idParams } from "../../core/fields.js";
 import { paginationQuery } from "../../core/pagination.js";
+import { profileFields } from "../users/users.schema.js";
 
 // TASKS 3 & 5 - Technician profiles. See docs/ONBOARDING-FLOW.md.
 
 export const technicianIdParams = idParams;
 
 /**
+ * A file the client already uploaded: the URL that POST /public/uploads gave
+ * back, e.g. "/uploads/1712345678-national-id.jpg". Never the file itself, and
+ * for the national id never the number either. 255 is the column width.
+ */
+const uploadedFileUrl = z.string().trim().min(1).max(255);
+
+/**
  * POST /technician/profile - screen 5b.
  *
  * A technician never sees the customer profile page, so this one form collects
- * *everything*: the same personal details a customer fills in, plus the two
+ * *everything*: the same personal details a customer fills in, plus their
  * documents. That is the "more inputs" half of the technician branch.
  *
- * TODO(task 3): add the fields.
- *
- *   -- the same details a customer gives (they go on the User row) --
- *   userId               idField from core/fields.ts (temporary - comes from
- *                        the JWT once auth exists)
- *   fullName             string, trimmed, 2-100
- *   city                 string, trimmed, 1-100
- *   address              string, trimmed, min 1
- *   latitude             number, -90..90
- *   longitude            number, -180..180
- *
- *   -- technician-only (they go on the TechnicianProfile row) --
- *   categoryId           idField - the speciality picked back on screen 3
- *   nationalId           string, 1-255 chars. This is a URL from the upload
- *                        endpoint, NOT the number and NOT the file itself.
- *   criminalRecordFile   same, optional
- *   profileImage         same, optional
- *
- * Tip: import `profileFields` from users.schema.ts rather than retyping the
- * first five - one definition, one set of rules.
+ * `profileFields` is imported rather than retyped, so the name/city/address
+ * rules can never drift apart from the customer form.
  */
-export const createTechnicianProfileBody = z.object({});
+export const createTechnicianProfileBody = z.object({
+  // No `userId`: the profile always belongs to the caller, and the route reads
+  // that from the token with `currentUser(req)`. Accepting it as a field would
+  // let a technician file documents against somebody else's account.
+  ...profileFields,
+
+  // The speciality picked back on screen 3.
+  categoryId: idField,
+
+  // The documents. Only the national id is required; the criminal record and
+  // the technician's own photo are nullable columns, so the app may send them
+  // later or not at all.
+  nationalId: uploadedFileUrl,
+  criminalRecordFile: uploadedFileUrl.optional(),
+  profileImage: uploadedFileUrl.optional(),
+});
 
 /**
  * PATCH /admin/technicians/:id/verification - task 5, the admin decides.

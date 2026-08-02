@@ -1,29 +1,52 @@
 # What to build
 
-31 functions, 5 tasks. The files already exist and are already plugged into the
-API — each has a `throw ApiError.notImplemented()` where your code goes, and a
-`TODO` comment with the details.
+31 functions, 5 tasks — tasks 2 and 3 are already done, so 23 are left. The files
+already exist and are already plugged into the API — each has a
+`throw ApiError.notImplemented()` where your code goes, and a `TODO` comment
+with the details.
 
 | Task | What | Items | Who |
 | ---- | ---- | ----- | --- |
 | 1 | Categories | 13 | |
-| 2 | Customer profile | 3 | |
-| 3 | Technician profile | 5 | |
+| 2 | Customer profile | 3 | ✅ done |
+| 3 | Technician profile | 5 | ✅ done |
 | 4 | File upload | 3 | |
 | 5 | Admin approval | 7 | |
 
-Order: **1 → 4 → 2 and 3 together → 5.** Task 3 needs 4. Task 5 touches the
-same files as 3.
+Order: **1 → 4 → 5.** Tasks 2 and 3 are finished; read them as the worked
+examples — and note that task 5 touches the same files as task 3.
 
 ## Setup
 
 ```bash
 npm install
-cp .env.example .env
+cp .env.example .env      # set JWT_SECRET, any 32+ random characters
 docker compose up -d
 npm run prisma:migrate
+npm run prisma:seed       # gives you the three test accounts below
 npm run dev
 ```
+
+### Getting a token
+
+Every endpoint outside `/public` needs one. Two calls — the code is printed by
+`npm run dev` and also comes back as `devOtpCode`:
+
+```bash
+API=localhost:3000/api/v1
+PHONE=+201000000001      # the seeded admin; …02 customer, …03 technician
+
+curl -X POST $API/public/auth/request-otp \
+  -H 'content-type: application/json' -d "{\"phone\":\"$PHONE\"}"
+
+ADMIN_TOKEN=$(curl -s -X POST $API/public/auth/verify-otp \
+  -H 'content-type: application/json' \
+  -d "{\"phone\":\"$PHONE\",\"otpCode\":\"PASTE-THE-CODE\"}" \
+  | jq -r .data.tokens.accessToken)
+```
+
+It lasts 15 minutes; after that you get `401` and either refresh
+(`POST /public/auth/refresh`) or repeat the two calls above.
 
 ## Copy this
 
@@ -45,6 +68,8 @@ routes  →  service  →  database
 ## Rules
 
 - No `try`/`catch` in routes. Just `throw ApiError.notFound("…")`.
+- Never take a `userId` from the body or the URL. `currentUser(req).id` — the
+  guards in `src/api/index.ts` already know who is calling.
 - Let Prisma throw. Duplicate → 409, missing → 404, bad FK → 409. Don't pre-check.
 - IDs are BigInt. Parse with `idParams`, return with `.toString()`.
 - Money → string, never a float.
@@ -91,18 +116,20 @@ management. Start here.
 
 ```bash
 curl -X POST localhost:3000/api/v1/admin/categories \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"name":"Plumbing","homeVisitBasePrice":150}'      # 201
-curl localhost:3000/api/v1/public/categories             # 200, array
+curl localhost:3000/api/v1/public/categories             # 200, array (no token)
 # repeat the POST                                        → 409
-curl localhost:3000/api/v1/admin/categories/9999         # 404
+curl localhost:3000/api/v1/admin/categories/9999 \
+  -H "Authorization: Bearer $ADMIN_TOKEN"                # 404
 ```
 
 Price must come back as `"150.00"`. If you see `150`, fix the mapper.
 
 ---
 
-# Task 2 — Customer profile
+# Task 2 — Customer profile ✅ done
 
 Screen 5a. Fills in the blanks left after OTP and flips the user to `ACTIVE`.
 
@@ -110,70 +137,77 @@ Screen 5a. Fills in the blanks left after OTP and flips the user to `ACTIVE`.
 
 **`users.schema.ts`** (add to the existing file)
 
-- [ ] `createCustomerProfileBody` — `userId` + the exported `profileFields`
+- [x] `createCustomerProfileBody` — just the exported `profileFields`
       (fullName, city, address, latitude, longitude). Reuse them, don't retype.
+      No `userId`: it comes from the token.
 
 **`users.service.ts`** (add to the existing file)
 
-- [ ] `completeCustomerProfile(userId, data)` — write the fields **and**
+- [x] `completeCustomerProfile(userId, data)` — write the fields **and**
       `status: "ACTIVE"` in one update. Reuse `updateUserFields`. 409 if the
       user isn't `PENDING` — copy `selectRole`.
 
 **`users.customer.routes.ts`**
 
-- [ ] `POST /` → 201 `{ data: { user, accountState, message } }`.
-      State from `resolveAccountState(user, null)`.
+- [x] `POST /` → 201 `{ data: { user, accountState, message } }`.
+      State from `resolveAccountState(user, null)`, id from
+      `currentUser(req).id` (`modules/auth/auth.middleware.js`).
 
 ### Test it
 
 ```bash
+# TOKEN comes from verify-otp — see "Getting a token" at the top.
 curl -X POST localhost:3000/api/v1/customer/profile \
-  -H 'content-type: application/json' \
-  -d '{"userId":"1","fullName":"Mona Ali","city":"Giza",
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"fullName":"Mona Ali","city":"Giza",
        "address":"12 Nile St","latitude":30.0131,"longitude":31.2089}'
 ```
 
 201 with `"accountState":"READY"`. Same call again → 409. Log in again → `READY`.
+No token → 401. A technician's token → 403.
 
 ---
 
-# Task 3 — Technician profile
+# Task 3 — Technician profile ✅ done
 
-Screen 5b. Personal details **and** documents in one form. Needs task 4 first.
+Screen 5b. Personal details **and** documents in one form. Already written —
+read it before starting task 2, it is the same job with a bigger payload.
 
 **`technicians.schema.ts`**
 
-- [ ] `createTechnicianProfileBody` — `userId`, `profileFields` (imported from
+- [x] `createTechnicianProfileBody` — `profileFields` (imported from
       `users.schema.ts`), `categoryId`, `nationalId`, optional
-      `criminalRecordFile` and `profileImage`
+      `criminalRecordFile` and `profileImage`. No `userId` — the route passes
+      `currentUser(req).id` to the service.
 
 **`technicians.service.ts`**
 
-- [ ] `createTechnicianProfile(data)` — **one `prisma.$transaction`**:
+- [x] `createTechnicianProfile(userId, data)` — **one `prisma.$transaction`**:
       1. `tx.user.update` — profile fields + `role: "TECHNICIAN"`
       2. `tx.technicianProfile.create` — `verificationStatus: "PENDING"`
 
       Leave `status` as `PENDING`. Return the user **and** the profile.
-- [ ] `findTechnicianProfileByUserId(userId)` — row or `null`
+- [x] `findTechnicianProfileByUserId(userId)` — row or `null`
 
 **`technicians.mapper.ts`**
 
-- [ ] `toTechnicianProfileResponse(profile)` — ids as strings, rating as string.
+- [x] `toTechnicianProfileResponse(profile)` — ids as strings, rating as string.
       **No `nationalId`, no `criminalRecordFile`** — admin-only, task 5.
 
 **`technicians.technician.routes.ts`**
 
-- [ ] `POST /` → 201 with the profile + `accountState` + `message`
+- [x] `POST /` → 201 with the profile + `accountState` + `message`
 
 ### Test it
 
 ```bash
-curl -X PATCH localhost:3000/api/v1/public/onboarding/2/role \
-  -H 'content-type: application/json' -d '{"role":"TECHNICIAN"}'
+curl -X PATCH localhost:3000/api/v1/me/role \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"role":"TECHNICIAN"}'
 
 curl -X POST localhost:3000/api/v1/technician/profile \
-  -H 'content-type: application/json' \
-  -d '{"userId":"2","fullName":"Karim","city":"Cairo","address":"5 Tahrir",
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"fullName":"Karim","city":"Cairo","address":"5 Tahrir",
        "latitude":30.0444,"longitude":31.2357,"categoryId":"1",
        "nationalId":"/uploads/nid.jpg"}'
 ```
@@ -250,9 +284,11 @@ Until an admin does this, every technician sits on the waiting screen.
 ### Test it
 
 ```bash
-curl "localhost:3000/api/v1/admin/technicians?verificationStatus=PENDING"
+curl "localhost:3000/api/v1/admin/technicians?verificationStatus=PENDING" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
 curl -X PATCH localhost:3000/api/v1/admin/technicians/1/verification \
-  -H 'content-type: application/json' -d '{"verificationStatus":"VERIFIED"}'
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
+  -d '{"verificationStatus":"VERIFIED"}'
 ```
 
 That technician logs in again → `READY`. Sending `"PENDING"` → 400.
@@ -267,5 +303,5 @@ That technician logs in again → `READY`. Sending `"PENDING"` → 400.
 
 ## Later, not now
 
-Service requests · technician offers · reviews · AI estimation · JWT auth ·
-a real SMS provider.
+Service requests · technician offers · reviews · AI estimation ·
+a real SMS provider · per-device token revocation.
