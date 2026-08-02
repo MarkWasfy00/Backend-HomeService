@@ -1,0 +1,11 @@
+node_modules
+dist
+
+# Keep environment variables out of version control
+.env
+
+# Prisma Client is generated from prisma/schema.prisma
+/src/generated/prisma
+
+# Uploaded files (task 4) - kept out of git
+uploads
