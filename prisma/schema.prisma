@@ -70,16 +70,23 @@ enum OfferStatus {
 // 1. users
 // ---------------------------------------------------------------------------
 
+// A user is created the moment their phone is verified, before they have
+// filled in anything else. Everything except the phone is therefore optional,
+// and `status` tracks how far they got:
+//
+//   PENDING  phone verified, profile not finished yet
+//   ACTIVE   profile complete, can use the app
+//   BLOCKED / SUSPENDED  moderation
 model User {
   id        BigInt     @id @default(autoincrement())
-  fullName  String     @map("full_name") @db.VarChar(100)
+  fullName  String?    @map("full_name") @db.VarChar(100)
   phone     String     @unique @db.VarChar(20)
 
   role       UserRole   @default(CUSTOMER)
-  city       String     @db.VarChar(100)
-  address    String     @db.Text
-  latitude   Decimal    @db.Decimal(10, 8)
-  longitude  Decimal    @db.Decimal(11, 8)
+  city       String?    @db.VarChar(100)
+  address    String?    @db.Text
+  latitude   Decimal?   @db.Decimal(10, 8)
+  longitude  Decimal?   @db.Decimal(11, 8)
   status     UserStatus @default(PENDING)
 
   createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)

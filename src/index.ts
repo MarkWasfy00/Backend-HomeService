@@ -1,11 +1,9 @@
-import "dotenv/config";
 import { app } from "./app.js";
-import { prisma } from "./prisma.js";
+import { env } from "./core/env.js";
+import { prisma } from "./core/prisma.js";
 
-const port = Number(process.env.PORT ?? 3000);
-
-const server = app.listen(port, () => {
-  console.log(`Server listening on http://localhost:${port}`);
+const server = app.listen(env.PORT, () => {
+  console.log(`Server listening on http://localhost:${env.PORT}`);
 });
 
 async function shutdown(signal: string) {
