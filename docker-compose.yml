@@ -1,24 +1,11 @@
 name: homeservice
 
+# Uses an already-running Postgres container on the host (published on
+# 5432) instead of provisioning its own - see the `homeservice` database
+# created there. `host.docker.internal` is how a container reaches the host
+# from inside the compose network; `host-gateway` is what resolves it on
+# Linux.
 services:
-  postgres:
-    image: postgres:17-alpine
-    container_name: homeservice-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: homeservice
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d homeservice"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   # Runs once per `up`, applies prisma/migrations, then exits - the app waits
   # for it to finish so it never talks to a database that is a migration
   # behind. Built from the `builder` stage because this needs the Prisma CLI.
@@ -30,10 +17,9 @@ services:
     container_name: homeservice-migrate
     command: ["npx", "prisma", "migrate", "deploy"]
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/homeservice?schema=public
-    depends_on:
-      postgres:
-        condition: service_healthy
+      DATABASE_URL: postgresql://appuser:${DB_PASSWORD:?set DB_PASSWORD in .env - see .env.example}@host.docker.internal:5432/homeservice?schema=public&sslmode=require
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: "no"
 
   app:
@@ -43,23 +29,23 @@ services:
     container_name: homeservice-api
     restart: unless-stopped
     environment:
-      NODE_ENV: production
+      # Left off "production" until the SMS provider in auth.sms.ts is wired
+      # up - production mode makes OTP requests throw instead of sending,
+      # since there's no real provider to send through yet.
+      NODE_ENV: development
       # The port inside the container; the host side is set under `ports`.
       PORT: 3000
-      # `postgres` is the service name above, not localhost - inside the
-      # compose network that is what resolves to the database. No sslmode,
-      # because this Postgres speaks plaintext on a private network.
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/homeservice?schema=public
+      DATABASE_URL: postgresql://appuser:${DB_PASSWORD:?set DB_PASSWORD in .env - see .env.example}@host.docker.internal:5432/homeservice?schema=public&sslmode=require
       # Read from .env (or the shell). Deliberately has no default: a shared
       # secret in a committed file is the same as no secret at all.
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env - see .env.example}
       ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-15}
       REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-30}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${PORT:-3000}:3000"
     depends_on:
-      postgres:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     healthcheck:
@@ -83,6 +69,3 @@ services:
     container_name: homeservice-seed
     profiles: ["seed"]
     command: ["npx", "prisma", "db", "seed"]
-
-volumes:
-  postgres-data:
