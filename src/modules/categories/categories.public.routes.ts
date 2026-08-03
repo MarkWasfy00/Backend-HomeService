@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { ApiError } from "../../core/errors.js";
+import * as categoriesService from "./categories.service.js";
+import { toCategoryResponse } from "./categories.mapper.js";
 
 /**
  * TASK 1 - the list customers and technicians pick from during onboarding
@@ -12,9 +13,8 @@ export const categoriesPublicRoutes = Router();
 
 /** GET /api/v1/public/categories */
 categoriesPublicRoutes.get("/", async (_req, res) => {
-  // TODO(task 1):
-  //   const categories = await categoriesService.listCategories();
-  //   res.json({ data: categories.map(toCategoryResponse) });
+  const categories = await categoriesService.listCategories();
+
   // No `meta` - this endpoint is not paginated.
-  throw ApiError.notImplemented();
+  res.json({ data: categories.map(toCategoryResponse) });
 });

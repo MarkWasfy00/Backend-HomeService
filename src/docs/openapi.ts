@@ -33,6 +33,7 @@ import {
   withExamples,
   type JsonSchema,
 } from "./openapi.components.js";
+import { createCategoryBody, updateCategoryBody } from "../modules/categories/categories.schema.js";
 
 /**
  * The OpenAPI 3.1 description of this API, served as a Swagger page at `/docs`
@@ -176,25 +177,6 @@ const signUpFormFields: Record<string, JsonSchema> = {
       "Technicians only, optional - the photo the app displays. Same limits as `nationalId`.",
   },
 };
-
-/**
- * Task 1 has not filled in `createCategoryBody` yet, so there is no zod schema
- * to generate this from. These are the fields the TODO in categories.schema.ts
- * asks for - delete them and use `fromZod(createCategoryBody)` once it exists.
- */
-const plannedCategoryFields: Record<string, JsonSchema> = {
-  name: { type: "string", minLength: 2, maxLength: 100, example: "Plumbing" },
-  homeVisitBasePrice: {
-    description:
-      "Accepted as a number or a string, stored and returned as a string. Positive, at most 2 decimal places.",
-    anyOf: [{ type: "number" }, { type: "string" }],
-    example: "150.00",
-  },
-};
-
-const plannedCategoryBody = object(plannedCategoryFields);
-/** The same fields on PATCH, where all of them are optional. */
-const plannedCategoryPatchBody = object(plannedCategoryFields, []);
 
 /** Task 5, same story: `updateVerificationBody` is still empty. */
 const plannedVerificationBody: JsonSchema = object({
@@ -825,7 +807,12 @@ export const openApiDocument = {
           "",
           scaffolded(1),
         ].join("\n\n"),
-        requestBody: jsonBody(plannedCategoryBody),
+        requestBody: jsonBody(
+          withExamples(fromZod(createCategoryBody), {
+            name: "Plumbing",
+            homeVisitBasePrice: "150.00",
+          }),
+        ),
         responses: {
           201: jsonResponse("Created.", dataOf(schemaRef("Category"))),
           400: responseRef("ValidationError"),
@@ -864,7 +851,7 @@ export const openApiDocument = {
           "",
           scaffolded(1),
         ].join("\n\n"),
-        requestBody: jsonBody(plannedCategoryPatchBody),
+       requestBody: jsonBody(fromZod(updateCategoryBody)),
         responses: {
           200: jsonResponse("Updated.", dataOf(schemaRef("Category"))),
           400: responseRef("ValidationError"),

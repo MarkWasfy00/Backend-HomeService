@@ -1,3 +1,4 @@
+import { prisma } from "../../core/prisma.js";
 import { ApiError } from "../../core/errors.js";
 import type {
   CreateCategoryBody,
@@ -16,34 +17,35 @@ import type {
  * There are only a handful, so no pagination - return a plain array.
  */
 export async function listCategories() {
-  // TODO(task 1): prisma.category.findMany({ orderBy: { name: "asc" } })
-  throw ApiError.notImplemented();
+  return prisma.category.findMany({ orderBy: { name: "asc" } });
 }
 
 /** One category, or a 404 if it does not exist. */
 export async function getCategoryById(id: bigint) {
-  // TODO(task 1): findUnique, then `throw ApiError.notFound("Category not found")`
-  // if it came back null. Copy getUserById.
-  throw ApiError.notImplemented();
+  const category = await prisma.category.findUnique({ where: { id } });
+
+  if (!category) {
+    throw ApiError.notFound("Category not found");
+  }
+
+  return category;
 }
 
 export async function createCategory(data: CreateCategoryBody) {
-  // TODO(task 1): prisma.category.create({ data }).
   // `name` is unique in the schema, so a duplicate already becomes a 409 by
-  // itself - do not check for one first.
-  throw ApiError.notImplemented();
+  // itself (Prisma's P2002) - do not check for one first.
+  return prisma.category.create({ data });
 }
 
 export async function updateCategory(id: bigint, data: UpdateCategoryBody) {
-  // TODO(task 1): prisma.category.update. A missing row raises P2025, which
-  // the error handler already turns into a 404.
-  throw ApiError.notImplemented();
+  // A missing row raises Prisma's P2025, which the error handler already
+  // turns into a 404 - nothing to catch here.
+  return prisma.category.update({ where: { id }, data });
 }
 
 export async function deleteCategory(id: bigint) {
-  // TODO(task 1): prisma.category.delete.
-  // Careful: technicians and service requests point at a category, so deleting
-  // one that is in use raises P2003 -> 409. That is the correct behaviour;
-  // you do not need to handle it here.
-  throw ApiError.notImplemented();
+  // Careful: technicians and service requests point at a category, so
+  // deleting one that is in use raises P2003 -> 409. That is the correct
+  // behaviour; no extra handling needed here.
+  return prisma.category.delete({ where: { id } });
 }

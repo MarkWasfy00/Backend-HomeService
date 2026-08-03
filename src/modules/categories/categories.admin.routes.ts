@@ -1,5 +1,11 @@
 import { Router } from "express";
-import { ApiError } from "../../core/errors.js";
+import * as categoriesService from "./categories.service.js";
+import { toCategoryResponse } from "./categories.mapper.js";
+import {
+  categoryIdParams,
+  createCategoryBody,
+  updateCategoryBody,
+} from "./categories.schema.js";
 
 /**
  * TASK 1 - back-office management of the service categories.
@@ -12,25 +18,30 @@ import { ApiError } from "../../core/errors.js";
 export const categoriesAdminRoutes = Router();
 
 /** GET /api/v1/admin/categories/:id */
-categoriesAdminRoutes.get("/:id", async (_req, res) => {
-  // TODO(task 1): parse categoryIdParams, getCategoryById, 200 with the mapped row
-  throw ApiError.notImplemented();
+categoriesAdminRoutes.get("/:id", async (req, res) => {
+  const { id } = categoryIdParams.parse(req.params);
+  const category = await categoriesService.getCategoryById(id);
+  res.json({ data: toCategoryResponse(category) });
 });
 
 /** POST /api/v1/admin/categories */
-categoriesAdminRoutes.post("/", async (_req, res) => {
-  // TODO(task 1): parse createCategoryBody, createCategory, 201 with the mapped row
-  throw ApiError.notImplemented();
+categoriesAdminRoutes.post("/", async (req, res) => {
+  const body = createCategoryBody.parse(req.body);
+  const category = await categoriesService.createCategory(body);
+  res.status(201).json({ data: toCategoryResponse(category) });
 });
 
 /** PATCH /api/v1/admin/categories/:id */
-categoriesAdminRoutes.patch("/:id", async (_req, res) => {
-  // TODO(task 1): parse params + updateCategoryBody, updateCategory, 200
-  throw ApiError.notImplemented();
+categoriesAdminRoutes.patch("/:id", async (req, res) => {
+  const { id } = categoryIdParams.parse(req.params);
+  const body = updateCategoryBody.parse(req.body);
+  const category = await categoriesService.updateCategory(id, body);
+  res.json({ data: toCategoryResponse(category) });
 });
 
 /** DELETE /api/v1/admin/categories/:id */
-categoriesAdminRoutes.delete("/:id", async (_req, res) => {
-  // TODO(task 1): parse params, deleteCategory, then `res.status(204).end()`
-  throw ApiError.notImplemented();
+categoriesAdminRoutes.delete("/:id", async (req, res) => {
+  const { id } = categoryIdParams.parse(req.params);
+  await categoriesService.deleteCategory(id);
+  res.status(204).end();
 });
