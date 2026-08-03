@@ -41,8 +41,16 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env - see .env.example}
       ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-15}
       REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-30}
+      # Matches the volume below. Files uploaded during signup live here, and
+      # the app serves them back under /uploads.
+      UPLOAD_DIR: /app/uploads
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      # Uploads are the one thing this container writes. Without a volume every
+      # redeploy would throw away the technicians' documents along with the
+      # old image, and the URLs stored in the database would 404.
+      - uploads:/app/uploads
     ports:
       - "${PORT:-3000}:3000"
     depends_on:
@@ -69,3 +77,8 @@ services:
     container_name: homeservice-seed
     profiles: ["seed"]
     command: ["npx", "prisma", "db", "seed"]
+
+volumes:
+  # Survives `docker compose down` and every redeploy. Remove it and the
+  # technicians' uploaded documents go with it.
+  uploads:

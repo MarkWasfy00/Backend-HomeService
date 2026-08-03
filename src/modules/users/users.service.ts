@@ -3,11 +3,14 @@ import type { UserStatus } from "../../generated/prisma/enums.js";
 import { prisma } from "../../core/prisma.js";
 import { ApiError } from "../../core/errors.js";
 import { skipTake } from "../../core/pagination.js";
+import type { TechnicianDocuments } from "../technicians/technicians.schema.js";
+import * as techniciansService from "../technicians/technicians.service.js";
 import type {
   CreateCustomerProfileBody,
   CreateUserBody,
   ListUsersQuery,
   SelectRoleBody,
+  SignUpBody,
   UpdateUserBody,
 } from "./users.schema.js";
 
@@ -130,6 +133,79 @@ export async function completeCustomerProfile(
   }
 
   return updateUserFields(userId, { ...data, status: "ACTIVE" });
+}
+
+/**
+ * What `signUp` works on: the parsed form body, plus - on the technician branch
+ * only - the URLs of the documents the route just stored. The two halves arrive
+ * separately because multipart keeps text and files apart, and they are joined
+ * here rather than in a route so the branching rule lives with the data.
+ */
+export type SignUpData =
+  | Extract<SignUpBody, { role: "CUSTOMER" }>
+  | (Extract<SignUpBody, { role: "TECHNICIAN" }> & TechnicianDocuments);
+
+/**
+ * POST /me/signup - the three onboarding screens (role, profile, documents) as
+ * one call, for the app that asks everything on a single form.
+ *
+ * Nothing new happens here: it is the same two destinations the step-by-step
+ * flow reaches, chosen by `role` instead of by which URL the app called.
+ *
+ *   CUSTOMER   → the profile lands on the User row, status ACTIVE   → READY
+ *   TECHNICIAN → the profile lands on the User row *and* a PENDING
+ *                TechnicianProfile is created                       → WAITING_FOR_APPROVAL
+ *
+ * The technician branch is delegated to `createTechnicianProfile` rather than
+ * reimplemented, so both endpoints share one transaction and one set of rules -
+ * and a user who started the step-by-step flow (picked a role, then closed the
+ * app) can finish here without anything special.
+ *
+ * Returns the technician profile alongside the user - null for a customer - so
+ * the route can hand both to `resolveAccountState` instead of deciding itself.
+ */
+export async function signUp(userId: bigint, data: SignUpData) {
+  const user = await prisma.user.findFirst({
+    where: { id: userId, ...notDeleted },
+    include: { technicianProfile: true },
+  });
+
+  if (!user) {
+    throw ApiError.notFound("User not found");
+  }
+
+  // The two guards selectRole uses, for the same reasons: signing up twice
+  // would reset a finished account's details, re-activate a suspended one, or
+  // strand a technician's documents on an account that just became a customer.
+  if (user.technicianProfile) {
+    throw ApiError.conflict(
+      "Documents were already submitted, this account cannot sign up again",
+    );
+  }
+
+  if (user.status !== "PENDING") {
+    throw ApiError.conflict("This account has already finished signing up");
+  }
+
+  if (data.role === "TECHNICIAN") {
+    return techniciansService.createTechnicianProfile(userId, data);
+  }
+
+  const updated = await updateUserFields(userId, {
+    fullName: data.fullName,
+    city: data.city,
+    address: data.address,
+    latitude: data.latitude,
+    longitude: data.longitude,
+    // Set explicitly rather than left to the column default: the caller may
+    // have picked TECHNICIAN on PATCH /me/role and changed their mind here.
+    role: "CUSTOMER",
+    // Written in the same update as the details, so there is no instant where
+    // an ACTIVE user has no name, or a complete profile is still PENDING.
+    status: "ACTIVE",
+  });
+
+  return { user: updated, technicianProfile: null };
 }
 
 export async function updateUser(id: bigint, data: UpdateUserBody) {

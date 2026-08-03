@@ -1,11 +1,19 @@
 import { Router } from "express";
+import { ApiError } from "../../core/errors.js";
 import { currentUser } from "../auth/auth.middleware.js";
 import { toTechnicianProfileResponse } from "../technicians/technicians.mapper.js";
 import * as techniciansService from "../technicians/technicians.service.js";
+import {
+  discardUploads,
+  publicUrlFor,
+  upload,
+  uploadedFilesByField,
+} from "../uploads/uploads.storage.js";
 import { toUserResponse } from "./users.mapper.js";
 import { accountStateMessage, resolveAccountState } from "./users.state.js";
 import * as usersService from "./users.service.js";
-import { selectRoleBody } from "./users.schema.js";
+import type { SignUpData } from "./users.service.js";
+import { selectRoleBody, signUpBody, type SignUpBody } from "./users.schema.js";
 
 /**
  * "My own account", mounted at /api/v1/me behind `requireAuth`.
@@ -74,3 +82,122 @@ usersMeRoutes.patch("/role", async (req, res) => {
     },
   });
 });
+
+/**
+ * The three file fields a technician may send. Declaring them is also what
+ * rejects everything else: any other file field is a LIMIT_UNEXPECTED_FILE,
+ * which the error handler turns into a 400 rather than silently ignoring it.
+ */
+const documentFields = [
+  { name: "nationalId", maxCount: 1 },
+  { name: "criminalRecordFile", maxCount: 1 },
+  { name: "profileImage", maxCount: 1 },
+];
+
+/**
+ * POST /api/v1/me/signup
+ *
+ * Onboarding as one call: the profile, the "customer or technician?" answer and
+ * - for a technician - the documents, all in a single `multipart/form-data`
+ * request. It exists for the app that asks for everything on one form, and
+ * replaces this sequence:
+ *
+ *   PATCH /me/role  →  POST /customer/profile
+ *   PATCH /me/role  →  POST /technician/profile  (+ an upload call per file)
+ *
+ * Those still work, and both paths end in the same place - this one calls the
+ * same service, which reaches the same rows through the same transaction.
+ *
+ * Mounted on /me and not on /customer or /technician on purpose: those groups
+ * are behind `requireRole`, and the role is exactly what this endpoint is
+ * being told. It is what the caller *becomes*, so it cannot also be the guard.
+ *
+ * A customer sends no files, so plain `application/json` works for them too -
+ * multer stands aside when the request is not multipart.
+ */
+usersMeRoutes.post(
+  "/signup",
+  upload.fields(documentFields),
+  async (req, res) => {
+    const files = uploadedFilesByField(req);
+
+    // The one try/catch in a route file, and it is not error translation - the
+    // throw carries on to the error handler untouched. By this line the files
+    // are already on disk, so a signup that fails validation or hits a 409 has
+    // to take them with it, or every rejected attempt leaves litter behind.
+    try {
+      const body = signUpBody.parse(req.body);
+
+      const { user, technicianProfile } = await usersService.signUp(
+        // Whose signup this is comes from the token, never from the body.
+        currentUser(req).id,
+        withDocuments(body, files),
+      );
+
+      // READY for a customer, WAITING_FOR_APPROVAL for a technician - but
+      // resolveAccountState says which, never this route, so the app gets the
+      // same answer here as it does from login and GET /me.
+      const accountState = resolveAccountState(user, technicianProfile);
+
+      res.status(201).json({
+        data: {
+          user: toUserResponse(user),
+          technicianProfile: technicianProfile
+            ? toTechnicianProfileResponse(technicianProfile)
+            : null,
+          accountState,
+          message: accountStateMessage[accountState],
+        },
+      });
+    } catch (error) {
+      await discardUploads(Object.values(files));
+      throw error;
+    }
+  },
+);
+
+/**
+ * Joins the parsed form fields to the files that came with them, which is where
+ * the two role-specific rules about files live:
+ *
+ *   TECHNICIAN  the national id is required, the other two are optional
+ *   CUSTOMER    no files at all - `User` has no column to put one in
+ *
+ * A customer who attaches a file is told so rather than having it quietly
+ * dropped: the alternative is a technician who picked the wrong role watching
+ * their documents vanish and their account go straight to READY.
+ */
+function withDocuments(
+  body: SignUpBody,
+  files: Record<string, Express.Multer.File>,
+): SignUpData {
+  if (body.role === "CUSTOMER") {
+    const attached = Object.keys(files);
+
+    if (attached.length > 0) {
+      throw ApiError.badRequest(
+        `A customer account has nowhere to store files, but ${attached.join(", ")} was attached. Send documents only with role=TECHNICIAN.`,
+      );
+    }
+
+    return body;
+  }
+
+  const nationalId = files.nationalId;
+
+  if (!nationalId) {
+    throw ApiError.badRequest(
+      "nationalId is required for a technician - attach the file as multipart/form-data",
+    );
+  }
+
+  return {
+    ...body,
+    // What is stored is the URL, never the file - the same string
+    // POST /technician/profile is handed by a client that uploaded separately.
+    nationalId: publicUrlFor(nationalId),
+    criminalRecordFile:
+      files.criminalRecordFile && publicUrlFor(files.criminalRecordFile),
+    profileImage: files.profileImage && publicUrlFor(files.profileImage),
+  };
+}

@@ -122,7 +122,7 @@ src/
       users.mapper.ts         database row → JSON response
       users.state.ts          which onboarding screen comes next
       users.admin.routes.ts   endpoints for the admin audience
-      users.me.routes.ts      the caller's own account
+      users.me.routes.ts      the caller's own account, incl. POST /me/signup
       users.customer.routes.ts   the customer profile page
     auth/                     phone + OTP login, and JWT
       auth.service.ts         codes, expiry, attempt limits, refresh
@@ -131,7 +131,9 @@ src/
       auth.sms.ts             ⚠️ where a real SMS provider plugs in
     categories/               🔨 task 1 — scaffolded, bodies empty
     technicians/              🔨 tasks 3 & 5 — scaffolded, bodies empty
-    uploads/                  🔨 task 4 — scaffolded, bodies empty
+    uploads/
+      uploads.storage.ts      where files go: limits, renaming, cleanup
+      uploads.public.routes.ts   🔨 task 4 — the standalone upload endpoint
 
   core/                       shared plumbing, used by every module
     env.ts                    validated environment variables
@@ -195,6 +197,7 @@ Three written docs, three audiences:
 | POST   | `/api/v1/public/auth/refresh`     | —    | `{ refreshToken }` → a fresh pair of tokens |
 | GET    | `/api/v1/me`                      | any  | who am I + `accountState` (+ technician profile) |
 | PATCH  | `/api/v1/me/role`                 | any  | `{ role }` → customer or technician branch |
+| POST   | `/api/v1/me/signup`               | any  | the whole of onboarding in one `multipart/form-data` call |
 
 These return an `accountState` telling the app which screen comes next:
 `COMPLETE_PROFILE` (customer → profile page), `SUBMIT_DOCUMENTS` (technician →
@@ -205,6 +208,27 @@ The code is valid 5 minutes, single use; 60s between resends; 5 wrong guesses
 locks the phone for 15 minutes. There's no SMS provider yet, so the code is
 printed in the `npm run dev` terminal and returned as `devOtpCode` (never in
 production).
+
+**After the code, two ways to finish the account** — both supported, both
+ending in the same rows:
+
+- *Step by step*: `PATCH /me/role`, then `POST /customer/profile` or
+  `POST /technician/profile` (which takes URLs from `POST /public/uploads`).
+- *All at once*: `POST /me/signup`, one `multipart/form-data` request carrying
+  the profile, the role, and — for a technician — `categoryId` plus the
+  `nationalId` / `criminalRecordFile` / `profileImage` **files themselves**.
+  A customer sends no files, so plain JSON works for them too.
+
+Uploads are JPEG, PNG or PDF, at most 5 MB, renamed by the server and written
+to `UPLOAD_DIR` (default `uploads/`), then served back under `/uploads/…` with
+`nosniff` (and `Content-Disposition: attachment` for PDFs). The rules live in
+one place, `src/modules/uploads/uploads.storage.ts`.
+
+Two limits worth knowing before this carries real identity documents: the URL
+is the only thing guarding a file, and nothing is ever deleted — see
+[`docs/ONBOARDING-FLOW.md`](docs/ONBOARDING-FLOW.md#what-the-upload-path-does-and-does-not-protect-against).
+
+`docs/ONBOARDING-FLOW.md` has the field-by-field table for both routes.
 
 **Users** — admin only, so every call needs an admin's token.
 
@@ -328,8 +352,10 @@ let a caller act as somebody else.
 - **Blocking works immediately.** `BLOCKED`/`SUSPENDED` is rejected on every
   request and on refresh, so a blocked account cannot renew its session.
 - **PENDING users get tokens too.** Onboarding itself is authenticated
-  (`PATCH /me/role`, `POST /customer/profile`), so the session has to start
-  before the profile is finished. Only the role guards apply there.
+  (`PATCH /me/role`, `POST /customer/profile`, `POST /me/signup`), so the
+  session has to start before the profile is finished. Only the role guards
+  apply there — which is why signup is on `/me`, the one group without one:
+  the role it sets cannot also be the role it checks.
 - **There is no session table, so an access token cannot be revoked before it
   expires** — that is why it is short. Changing `JWT_SECRET` invalidates
   everything at once, which is the only "log everyone out" button today. If

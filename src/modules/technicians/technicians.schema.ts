@@ -15,6 +15,24 @@ export const technicianIdParams = idParams;
 const uploadedFileUrl = z.string().trim().min(1).max(255);
 
 /**
+ * The three files a technician profile is built from, as the URLs they are
+ * stored under. Only the national id is required; the criminal record and the
+ * technician's own photo are nullable columns, so the app may send them later
+ * or not at all.
+ *
+ * Its own schema because two endpoints end up holding exactly this shape:
+ * `POST /technician/profile`, where the client sends URLs it got from
+ * `POST /public/uploads`, and `POST /me/signup`, where the files themselves
+ * arrive as multipart and the route converts them to URLs. Both hand the
+ * result to the same service.
+ */
+const technicianDocuments = z.object({
+  nationalId: uploadedFileUrl,
+  criminalRecordFile: uploadedFileUrl.optional(),
+  profileImage: uploadedFileUrl.optional(),
+});
+
+/**
  * POST /technician/profile - screen 5b.
  *
  * A technician never sees the customer profile page, so this one form collects
@@ -33,12 +51,7 @@ export const createTechnicianProfileBody = z.object({
   // The speciality picked back on screen 3.
   categoryId: idField,
 
-  // The documents. Only the national id is required; the criminal record and
-  // the technician's own photo are nullable columns, so the app may send them
-  // later or not at all.
-  nationalId: uploadedFileUrl,
-  criminalRecordFile: uploadedFileUrl.optional(),
-  profileImage: uploadedFileUrl.optional(),
+  ...technicianDocuments.shape,
 });
 
 /**
@@ -61,5 +74,6 @@ export const listTechniciansQuery = paginationQuery;
 export type CreateTechnicianProfileBody = z.infer<
   typeof createTechnicianProfileBody
 >;
+export type TechnicianDocuments = z.infer<typeof technicianDocuments>;
 export type UpdateVerificationBody = z.infer<typeof updateVerificationBody>;
 export type ListTechniciansQuery = z.infer<typeof listTechniciansQuery>;

@@ -13,4 +13,9 @@ export const meRouter = Router();
 
 // GET /api/v1/me            who am I + which screen comes next
 // PATCH /api/v1/me/role     the "customer or technician?" screen
+// POST /api/v1/me/signup    role + profile + documents, all in one call
+//
+// Signup lives here rather than in /customer or /technician for the reason
+// this group exists: those two are behind `requireRole`, and the role is
+// exactly what that endpoint is being told - it cannot also be the guard.
 meRouter.use("/", usersMeRoutes);

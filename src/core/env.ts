@@ -20,6 +20,12 @@ const envSchema = z.object({
   ACCESS_TOKEN_TTL_MINUTES: z.coerce.number().int().positive().default(15),
   // Long, because the alternative is sending another SMS.
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
+
+  // Where uploaded documents and photos are written. Relative paths resolve
+  // against the working directory the process was started from. In Docker this
+  // wants to point at a mounted volume, or every deploy throws the files away -
+  // see the `uploads` volume in docker-compose.yml.
+  UPLOAD_DIR: z.string().min(1).default("uploads"),
 });
 
 const parsed = envSchema.safeParse(process.env);

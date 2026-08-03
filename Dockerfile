@@ -37,6 +37,12 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=builder /app/dist ./dist
 
+# Uploaded documents land here. Creating it in the image, owned by `node`, is
+# also what gives the compose volume mounted over it the right ownership -
+# Docker seeds a fresh named volume from whatever is already at the mount point,
+# and a directory it creates itself would belong to root and be unwritable.
+RUN mkdir -p /app/uploads && chown node:node /app/uploads
+
 USER node
 EXPOSE 3000
 

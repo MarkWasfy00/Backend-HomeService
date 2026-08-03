@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { UserRole, UserStatus } from "../../generated/prisma/enums.js";
 import { paginationQuery } from "../../core/pagination.js";
-import { idParams, phoneField as phone } from "../../core/fields.js";
+import { idField, idParams, phoneField as phone } from "../../core/fields.js";
 
 // Every shape the users API accepts is declared here, and nowhere else.
 // Routes call `someSchema.parse(...)`; a failure is turned into a 400 by the
@@ -80,6 +80,34 @@ export const selectRoleBody = z.object({
   role: z.enum([UserRole.CUSTOMER, UserRole.TECHNICIAN]),
 });
 
+/**
+ * POST /me/signup - the whole of onboarding in one call.
+ *
+ * The text half of a `multipart/form-data` body: the profile fields every user
+ * gives, the role they picked, and - for a technician - the category they work
+ * in. The files themselves are not described here; multer takes them off the
+ * request and the route turns them into the URLs the service stores.
+ *
+ * A discriminated union rather than one flat object with optional fields,
+ * because `categoryId` is not "optional" - it is required of a technician and
+ * meaningless for a customer. This way a technician who forgets it gets a
+ * `categoryId` error rather than a foreign key failure three layers down, and
+ * a customer who sends one is told plainly that it does not belong.
+ *
+ * Multipart delivers every value as a string, which is why the numeric fields
+ * coerce (`profileFields`) and `categoryId` reuses `idField` - the same
+ * string-to-BigInt rule a URL parameter goes through.
+ */
+export const signUpBody = z.discriminatedUnion("role", [
+  z.object({ ...profileFields, role: z.literal(UserRole.CUSTOMER) }),
+  z.object({
+    ...profileFields,
+    role: z.literal(UserRole.TECHNICIAN),
+    // The speciality picked on the category screen.
+    categoryId: idField,
+  }),
+]);
+
 export type ListUsersQuery = z.infer<typeof listUsersQuery>;
 export type CreateUserBody = z.infer<typeof createUserBody>;
 export type CreateCustomerProfileBody = z.infer<
@@ -87,3 +115,4 @@ export type CreateCustomerProfileBody = z.infer<
 >;
 export type UpdateUserBody = z.infer<typeof updateUserBody>;
 export type SelectRoleBody = z.infer<typeof selectRoleBody>;
+export type SignUpBody = z.infer<typeof signUpBody>;

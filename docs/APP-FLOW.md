@@ -50,6 +50,35 @@ Base URL: `http://localhost:3000/api/v1`
  └────────────────────────────┘
 ```
 
+### Or: screens 4 and 5 on one form
+
+If your signup is a single form rather than a screen per question, replace
+everything from step 4 down with one call:
+
+```
+  ┌─────────────────┐
+  │ 2. Enter code   │  POST /public/auth/verify-otp
+  └────────┬────────┘
+           │  isNewUser: true  →  show the signup form
+           ▼
+  ┌──────────────────────────┐
+  │ Signup form              │  POST /me/signup   multipart/form-data
+  │  name, city, address,    │
+  │  location, role,         │  the files go in this same request —
+  │  + docs if TECHNICIAN    │  no separate upload call
+  └────────┬─────────────────┘
+           ▼
+     CUSTOMER → READY (profile screen)
+     TECHNICIAN → WAITING_FOR_APPROVAL (waiting screen)
+```
+
+You still need `GET /public/categories` (screen 3) to populate the category
+picker on that form, since a technician has to send `categoryId`.
+
+See [Signup in one call](#signup-in-one-call) below for the exact fields. Both
+routes are supported and reach the same place, so pick whichever matches your
+UI — you do not have to use the same one for customers and technicians.
+
 ---
 
 ## Screen 1 — Enter phone
@@ -224,6 +253,71 @@ because a technician never sees screen 5a.
 `409` "Documents were already submitted" means they submitted before — go to
 the waiting screen instead.
 
+## Signup in one call
+
+For a signup that is one form instead of three screens. Everything screens 4,
+5a and 5b collect, in a single request — and the files go **in this request**,
+so there is no separate upload call.
+
+```http
+POST /me/signup
+Authorization: Bearer <accessToken>
+Content-Type: multipart/form-data
+```
+
+| Field                | Customer | Technician | |
+| -------------------- | -------- | ---------- | --- |
+| `fullName`           | required | required   | 2–100 chars |
+| `city`               | required | required   | |
+| `address`            | required | required   | |
+| `latitude`           | required | required   | −90…90 |
+| `longitude`          | required | required   | −180…180 |
+| `role`               | required | required   | `CUSTOMER` or `TECHNICIAN` |
+| `categoryId`         | ✗        | required   | the id from screen 3 |
+| `nationalId`         | ✗        | required   | **the file** — jpeg/png/pdf, ≤ 5 MB |
+| `criminalRecordFile` | ✗        | optional   | the file |
+| `profileImage`       | ✗        | optional   | the file |
+
+✗ means sending it is a `400`, not that it is ignored — so a technician who
+picked the wrong role finds out instead of losing their documents silently.
+
+A customer sends no files at all, so you can post plain JSON for them if that
+is easier:
+
+```http
+POST /me/signup
+Content-Type: application/json
+{ "fullName": "Mona Ali", "city": "Giza", "address": "12 Nile St",
+  "latitude": 30.0131, "longitude": 31.2089, "role": "CUSTOMER" }
+```
+
+```jsonc
+// 201 — customer
+{ "data": { "user": { … "role": "CUSTOMER", "status": "ACTIVE" },
+            "technicianProfile": null,
+            "accountState": "READY",
+            "message": "Your account is ready" } }
+
+// 201 — technician
+{ "data": { "user": { … "role": "TECHNICIAN", "status": "PENDING" },
+            "technicianProfile": { … "verificationStatus": "PENDING" },
+            "accountState": "WAITING_FOR_APPROVAL",
+            "message": "Your documents are under review. …" } }
+```
+
+→ Switch on `accountState` exactly as you would after screen 5a or 5b.
+
+What can come back instead:
+
+| Status | When |
+| ------ | ---- |
+| `400` | a missing or malformed field, a file over 5 MB, a type that is not jpeg/png/pdf, a customer that attached a file, or a technician that forgot `nationalId` |
+| `409` | this account already finished signing up — go to the waiting screen or the profile screen, do not retry |
+| `401` | no token, or an expired one — refresh it |
+
+A rejected signup stores nothing and keeps no files, so it is safe to fix the
+form and post it again.
+
 ## The waiting screen
 
 A technician stays here until an admin approves them. To find out when that
@@ -351,8 +445,13 @@ GET   /me
 PATCH /me/role
 POST  /customer/profile             screen 5a
 POST  /technician/profile           screen 5b (the upload it feeds on is not)
+POST  /me/signup                    screens 4 + 5 in one call, files included
       + the whole /admin/users section
 ```
+
+**If you are wiring up technician signup today, use `POST /me/signup`.** It is
+the only path that works end to end right now: it takes the files themselves,
+so it does not depend on `POST /public/uploads`, which is still scaffolded.
 
 Returns `501 not_implemented` until the team finishes it — the URLs exist, so
 you can wire the app up against them now:

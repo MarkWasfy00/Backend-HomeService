@@ -221,26 +221,33 @@ never `COMPLETE_PROFILE`. Response must not contain `nationalId`.
 
 The app uploads each document, gets a URL, sends those URLs with task 3's form.
 
-```bash
-npm install multer && npm install -D @types/multer
-```
+**Most of this is already done.** `POST /me/signup` needed to store files, so
+multer is installed and the whole storage layer exists in
+**`uploads.storage.ts`** — the configured instance, the jpeg/png/pdf filter, the
+5 MB limit, the renaming, `publicUrlFor`, and `discardUploads`. `app.ts` already
+serves the folder and `core/error-handler.ts` already turns a `MulterError`
+into a 400.
+
+What is left is the standalone endpoint, for clients that upload before they
+submit a form rather than with it.
 
 **`uploads.public.routes.ts`**
 
 - [ ] `POST /` — `multipart/form-data`, field `file` → 201
       `{ data: { url: "/uploads/…" } }`
 
-      Multer: disk storage into `uploads/`; rename every file yourself
-      (`${Date.now()}-${randomUUID()}${ext}` — never reuse the client's name);
-      jpeg/png/pdf only; max 5 MB.
+      Import `upload` and `publicUrlFor` from `./uploads.storage.js`; do **not**
+      configure a second multer, or the two upload paths will drift apart. Add
+      `upload.single("file")` as route middleware, then
+      `res.status(201).json({ data: { url: publicUrlFor(req.file!) } })`.
 
-**`app.ts`**
+- [ ] Decide what an empty request does. `upload.single` leaves `req.file`
+      undefined when no file was sent, and that has to be a 400, not a crash.
 
-- [ ] `app.use("/uploads", express.static("uploads"));`
+**`src/api/public.ts`**
 
-**`core/error-handler.ts`**
-
-- [ ] A `MulterError` branch → 400 instead of 500
+- [ ] Worth moving behind `requireAuth` while you are in there — see the note in
+      that file. Everyone who uploads has a token by the time they do.
 
 ### Test it
 
@@ -248,6 +255,7 @@ npm install multer && npm install -D @types/multer
 curl -X POST localhost:3000/api/v1/public/uploads -F 'file=@photo.jpg'  # 201
 curl localhost:3000/uploads/THE-RETURNED-NAME                           # the file
 curl -X POST localhost:3000/api/v1/public/uploads -F 'file=@big.zip'    # 400
+curl -X POST localhost:3000/api/v1/public/uploads                       # 400, no file
 ```
 
 ---

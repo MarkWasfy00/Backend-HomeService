@@ -3,6 +3,21 @@
 How a user gets from "opened the app" to "can use the app", which endpoint
 serves each screen, and which ones are still to be built.
 
+## Two ways through, same destination
+
+Steps 1 and 2 are always the same: phone, then code. What follows the code
+depends on how the app asks for it, and **both routes are supported**.
+
+**Step by step** — one screen per endpoint. Described in the table below.
+
+**All at once** — `POST /api/v1/me/signup` takes the role, the profile and (for
+a technician) the documents as one `multipart/form-data` request, with the files
+themselves rather than URLs. See *Signing up in one call* below.
+
+They are not two implementations. Signup calls the same service functions the
+step-by-step endpoints call, so an account that started one way can finish the
+other, and `accountState` means the same thing whichever was used.
+
 ## The screens, and what each one calls
 
 | # | Screen                        | Endpoint                              | Status |
@@ -14,6 +29,7 @@ serves each screen, and which ones are still to be built.
 | 5a| Customer → profile page       | `POST /api/v1/customer/profile`        | ✅ done |
 | 5b| Technician → documents form   | `POST /api/v1/technician/profile`      | ✅ done |
 |   | ↳ the file upload itself      | `POST /api/v1/public/uploads`          | 🔨 task 4 |
+| — | **4 + 5 on one form**         | `POST /api/v1/me/signup`               | ✅ done |
 |   | Admin approves the technician | `PATCH /api/v1/admin/technicians/:id/verification` | 🔨 task 5 |
 
 Every 🔨 endpoint **already exists in the route map** — the files are written,
@@ -188,6 +204,84 @@ Neither body carries a `userId`: the profile always belongs to the caller, and
 the route reads that from the token. Accepting one as a field would let a user
 file a profile against somebody else's account.
 
+### Signing up in one call
+
+Everything above assumes the app asks one question per screen. An app that puts
+the role, the profile and the documents on a single form calls this instead:
+
+```
+POST /api/v1/me/signup       Authorization: Bearer <accessToken>
+                             Content-Type: multipart/form-data
+```
+
+| Field                | Customer | Technician | Notes |
+| -------------------- | -------- | ---------- | ----- |
+| `fullName`           | required | required   | |
+| `city`               | required | required   | |
+| `address`            | required | required   | |
+| `latitude`           | required | required   | |
+| `longitude`          | required | required   | |
+| `role`               | required | required   | `CUSTOMER` or `TECHNICIAN` |
+| `categoryId`         | rejected | required   | from `GET /public/categories` |
+| `nationalId`         | rejected | required   | **the file**, not a URL |
+| `criminalRecordFile` | rejected | optional   | the file |
+| `profileImage`       | rejected | optional   | the file |
+
+The response is the contract above plus `technicianProfile`, which is `null`
+for a customer. `accountState` is `READY` for a customer and
+`WAITING_FOR_APPROVAL` for a technician — same two destinations as the
+step-by-step flow, because it is the same code underneath.
+
+Four things worth knowing:
+
+- **It is on `/me`, not `/customer` or `/technician`.** Those groups sit behind
+  `requireRole`, and the role is exactly what this call is being told. It is
+  what the caller *becomes*, so it cannot also be the guard.
+- **A customer sends no files, so plain JSON works for them too.** Multer stands
+  aside when the request is not multipart.
+- **Uploads go through the same rules as task 4**: JPEG, PNG or PDF, at most
+  5 MB each. The server renames every file, so the client's filename is ignored.
+  A signup that fails for any reason deletes whatever it had already stored.
+- **The rules are the same**: no `userId` in the body, `409` if the account has
+  already finished signing up, and `accountState` from `resolveAccountState`.
+
+Files land in `UPLOAD_DIR` (default `uploads/`) and are served back under
+`/uploads/…`, which is what the stored URLs point at.
+
+### What the upload path does and does not protect against
+
+Handled:
+
+- **Type and size.** jpeg / png / pdf, 5 MB, 3 files per request.
+- **The filename.** Never reused from the client — it is
+  `${Date.now()}-${randomUUID()}` plus an extension taken from our own mime
+  table, so `../` and double extensions cannot get through.
+- **Orphans on failure.** A signup that fails at any point deletes whatever it
+  had already stored, so a rejected attempt leaves nothing behind.
+- **Content sniffing.** Multer can only believe the `Content-Type` the client
+  declared, so a `.jpg` may hold anything. Files are served with
+  `X-Content-Type-Options: nosniff`, and PDFs additionally with
+  `Content-Disposition: attachment` — a PDF can carry JavaScript and the
+  browser's viewer would otherwise run it on this origin. Images stay inline so
+  the app can point an `<img>` at a profile photo.
+
+Not handled — decide these before real identity documents go through:
+
+- **The URL is the only credential.** Anyone holding it can read the file; the
+  random name is all that protects it. That is why
+  `toTechnicianProfileResponse` never returns `nationalId` to a non-admin. Signed
+  URLs, or serving documents through an authenticated route, is the fix.
+- **Nothing is ever deleted.** Soft-deleting a user leaves their documents on
+  disk forever, and there is no retention policy or disk quota. Growth is
+  unbounded.
+- **One node only.** The files are on local disk, so a second app container
+  would not see them. Moving `uploads.storage.ts` to S3 is the one-module change
+  that fixes this and the two points above at once.
+- **A rejected technician cannot resubmit.** `VERIFICATION_REJECTED` is
+  reachable, but both `POST /me/signup` and `POST /technician/profile` answer
+  `409` once a profile row exists — there is no endpoint that replaces the
+  documents. Needs building alongside task 5.
+
 **3. The category picked at step 3 is only stored for technicians.**
 
 For a technician it is their speciality, and `TechnicianProfile.categoryId`
@@ -207,6 +301,7 @@ POST  /api/v1/public/auth/verify-otp      { phone, otpCode }
 POST  /api/v1/public/auth/refresh         { refreshToken }
 GET   /api/v1/me                          who am I + accountState
 PATCH /api/v1/me/role                     { role: "CUSTOMER" | "TECHNICIAN" }
+POST  /api/v1/me/signup                   role + profile + documents, one call
 ```
 
 Rules baked into `src/modules/auth/auth.service.ts` (all the numbers are named
@@ -333,18 +428,29 @@ personal details **and** their documents. Import `profileFields` from
 
 ## Task 4 — File upload
 
-Needed by task 3.
+Needed by task 3. **Most of it already exists**: `POST /api/v1/me/signup` had to
+store files, so `src/modules/uploads/uploads.storage.ts` now holds the whole
+storage layer — the configured multer instance, the type and size limits, the
+renaming, and `publicUrlFor`. `app.ts` already serves the folder.
+
+What is left is the standalone endpoint, for clients that upload before they
+submit a form:
 
 ```
 POST /api/v1/public/uploads    multipart/form-data, field name "file"
-  → { data: { url: "/uploads/1712345678-national-id.jpg" } }
+  → { data: { url: "/uploads/1712345678-<uuid>.jpg" } }
 ```
 
-- Use `multer` with disk storage into an `uploads/` folder (add it to
-  `.gitignore`), and serve it with `express.static`.
-- Accept `image/jpeg`, `image/png`, `application/pdf` only. Max 5 MB.
-- Rename every file — never trust the client's filename.
-- Local disk is fine for now; S3 can replace this one module later.
+- Import `upload` and `publicUrlFor` from `uploads.storage.js` rather than
+  configuring a second multer — the limits must not diverge between the two
+  upload paths.
+- `upload.single("file")` as route middleware, then
+  `res.status(201).json({ data: { url: publicUrlFor(req.file) } })`.
+- Rejections already answer correctly: `core/error-handler.ts` turns a
+  `MulterError` into a 400 and an unsupported type into `unsupported_file_type`.
+- Worth moving behind `requireAuth` while you are there — see the note in
+  `src/api/public.ts`. Everyone who uploads has a token by then.
+- Local disk is fine for now; S3 can replace that one module later.
 
 ## Task 5 — Admin approves a technician
 

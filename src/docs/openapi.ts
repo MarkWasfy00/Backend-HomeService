@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { VerificationStatus } from "../generated/prisma/enums.js";
+import { UserRole, VerificationStatus } from "../generated/prisma/enums.js";
 import { paginationQuery } from "../core/pagination.js";
 import {
   refreshBody,
@@ -101,6 +101,80 @@ const documentExamples = {
   nationalId: "/uploads/1712345678-national-id.jpg",
   criminalRecordFile: "/uploads/1712345678-criminal-record.pdf",
   profileImage: "/uploads/1712345678-photo.jpg",
+};
+
+/**
+ * The one request body in this document that is written out rather than
+ * generated, because neither half of it can come from `fromZod`:
+ *
+ *   - the three file fields are not in `signUpBody` at all. Multer takes them
+ *     off the request before the schema ever sees it, so zod knows nothing
+ *     about them - but a form with no file inputs is not worth documenting.
+ *   - `signUpBody` is a discriminated union, which generates as `anyOf`.
+ *     Swagger renders that as a set of tabs, and a multipart form split across
+ *     tabs cannot be filled in at all.
+ *
+ * So: keep this in step with `signUpBody` in users.schema.ts and
+ * `withDocuments` in users.me.routes.ts. The rules it describes are enforced
+ * there, not here.
+ */
+const signUpFormFields: Record<string, JsonSchema> = {
+  fullName: {
+    type: "string",
+    minLength: 2,
+    maxLength: 100,
+    example: profileExamples.fullName,
+  },
+  city: {
+    type: "string",
+    minLength: 1,
+    maxLength: 100,
+    example: profileExamples.city,
+  },
+  address: { type: "string", minLength: 1, example: profileExamples.address },
+  latitude: {
+    type: "number",
+    minimum: -90,
+    maximum: 90,
+    example: profileExamples.latitude,
+  },
+  longitude: {
+    type: "number",
+    minimum: -180,
+    maximum: 180,
+    example: profileExamples.longitude,
+  },
+  role: {
+    type: "string",
+    enum: [UserRole.CUSTOMER, UserRole.TECHNICIAN],
+    description:
+      "Which branch to take. `ADMIN` is not accepted - this acts on the caller's own account.",
+    example: UserRole.TECHNICIAN,
+  },
+  categoryId: {
+    type: "string",
+    pattern: "^\\d+$",
+    description:
+      "**Technicians only, and required for them** - the speciality picked from `GET /api/v1/public/categories`. Sending it as a customer is a `400`.",
+    example: documentExamples.categoryId,
+  },
+  nationalId: {
+    type: "string",
+    format: "binary",
+    description:
+      "**Technicians only, and required for them.** The file itself, not a URL. JPEG, PNG or PDF, at most 5 MB.",
+  },
+  criminalRecordFile: {
+    type: "string",
+    format: "binary",
+    description: "Technicians only, optional. Same limits as `nationalId`.",
+  },
+  profileImage: {
+    type: "string",
+    format: "binary",
+    description:
+      "Technicians only, optional - the photo the app displays. Same limits as `nationalId`.",
+  },
 };
 
 /**
@@ -461,6 +535,8 @@ export const openApiDocument = {
           "- `TECHNICIAN` → `SUBMIT_DOCUMENTS`, the documents form instead",
           "",
           "`ADMIN` is not accepted: this acts on the caller's own account, so allowing it would let anyone promote themselves. Answering again after onboarding has finished is a `409`.",
+          "",
+          "Step one of the step-by-step flow. An app that collects the role, the profile and the documents on one form can skip it and call `POST /api/v1/me/signup` instead.",
         ].join("\n"),
         requestBody: jsonBody(
           withExamples(fromZod(selectRoleBody), { role: "TECHNICIAN" }),
@@ -469,6 +545,79 @@ export const openApiDocument = {
           200: jsonResponse("Role stored.", accountStateEnvelope()),
           400: responseRef("ValidationError"),
           401: responseRef("Unauthorized"),
+          404: responseRef("NotFound"),
+          409: responseRef("Conflict"),
+        },
+      },
+    },
+
+    "/api/v1/me/signup": {
+      post: {
+        tags: ["Me"],
+        operationId: "signUp",
+        summary: "Finish my account in one call",
+        description: [
+          "Onboarding as a single `multipart/form-data` request: the profile, the customer-or-technician answer, and - for a technician - the documents as **actual file uploads**. For the app that asks for all of it on one form.",
+          "",
+          "It replaces this sequence, which still works:",
+          "",
+          "```",
+          "PATCH /me/role  →  POST /customer/profile",
+          "PATCH /me/role  →  POST /technician/profile   (+ one upload call per file)",
+          "```",
+          "",
+          "Both paths reach the same rows through the same service, so an account that started step by step can finish here.",
+          "",
+          "### What comes back",
+          "",
+          "- `CUSTOMER` → the account is `ACTIVE`, `accountState` is `READY`, `technicianProfile` is null",
+          "- `TECHNICIAN` → the `TechnicianProfile` is created `PENDING`, the user stays `PENDING`, and `accountState` is `WAITING_FOR_APPROVAL` until an admin verifies them",
+          "",
+          "### Notes",
+          "",
+          "- It is on `/me` rather than `/customer` or `/technician` because those groups are behind `requireRole`, and the role is what this call *sets*.",
+          "- A customer sends no files, so plain `application/json` works for them too.",
+          "- Uploads are JPEG, PNG or PDF, at most 5 MB each. The server renames every file; the name the client sends is ignored.",
+          "- There is no `userId` field - the account is the one the access token belongs to.",
+          "- Calling it once onboarding has finished is a `409`, the same as the endpoints it replaces.",
+        ].join("\n"),
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: object(signUpFormFields, [
+                "fullName",
+                "city",
+                "address",
+                "latitude",
+                "longitude",
+                "role",
+              ]),
+              encoding: {
+                nationalId: {
+                  contentType: "image/jpeg, image/png, application/pdf",
+                },
+                criminalRecordFile: {
+                  contentType: "image/jpeg, image/png, application/pdf",
+                },
+                profileImage: { contentType: "image/jpeg, image/png" },
+              },
+            },
+          },
+        },
+        responses: {
+          201: jsonResponse(
+            "Account complete. A technician is now waiting for approval; a customer can use the app.",
+            accountStateEnvelope({
+              technicianProfile: {
+                description: "Null when the caller signed up as a customer.",
+                oneOf: [schemaRef("TechnicianProfile"), { type: "null" }],
+              },
+            }),
+          ),
+          400: responseRef("ValidationError"),
+          401: responseRef("Unauthorized"),
+          403: responseRef("Forbidden"),
           404: responseRef("NotFound"),
           409: responseRef("Conflict"),
         },
@@ -489,6 +638,8 @@ export const openApiDocument = {
           "There is no `userId` field: the profile belongs to the caller, taken from the token.",
           "",
           "Calling it again once onboarding has finished is a `409`: the account is no longer `PENDING`.",
+          "",
+          "Reached after `PATCH /api/v1/me/role`. `POST /api/v1/me/signup` does both in one call.",
         ].join("\n\n"),
         requestBody: jsonBody(
           withExamples(fromZod(createCustomerProfileBody), profileExamples),
@@ -516,6 +667,8 @@ export const openApiDocument = {
           "A technician never sees the customer profile page, so this one call carries their personal details *and* their national ID / criminal record, and creates the TechnicianProfile row.",
           "",
           "Upload the files first with `POST /api/v1/public/uploads` and send the URLs it returns. The account then sits in `WAITING_FOR_APPROVAL` until an admin verifies it - the user's status stays `PENDING` on purpose.",
+          "",
+          "`POST /api/v1/me/signup` is the one-call alternative, and the only one that works today: it takes the files themselves as multipart, so it does not need the upload endpoint above, which is still scaffolded.",
         ].join("\n"),
         requestBody: jsonBody(
           withExamples(fromZod(createTechnicianProfileBody), {
