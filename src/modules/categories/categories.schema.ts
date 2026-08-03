@@ -14,6 +14,7 @@ const name = z.string().trim().min(2).max(100);
 const homeVisitBasePrice = z.coerce
   .number()
   .positive()
+  .max(99_999_999.99)
   .refine((n) => Number(n.toFixed(2)) === n, {
     message: "homeVisitBasePrice can have at most 2 decimal places",
   })

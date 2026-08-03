@@ -14,6 +14,7 @@ export const categoriesPublicRoutes = Router();
 /** GET /api/v1/public/categories */
 categoriesPublicRoutes.get("/", async (_req, res) => {
   const categories = await categoriesService.listCategories();
-  res.json({ data: categories.map(toCategoryResponse) });
+
   // No `meta` - this endpoint is not paginated.
+  res.json({ data: categories.map(toCategoryResponse) });
 });

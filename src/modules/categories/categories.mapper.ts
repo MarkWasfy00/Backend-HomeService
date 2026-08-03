@@ -12,8 +12,10 @@ export function toCategoryResponse(category: Category) {
   return {
     id: category.id.toString(),
     name: category.name,
-    homeVisitBasePrice: category.homeVisitBasePrice.toString(),
+    homeVisitBasePrice: category.homeVisitBasePrice.toFixed(2),
     createdAt: category.createdAt,
     updatedAt: category.updatedAt,
   };
 }
+
+export type CategoryResponse = ReturnType<typeof toCategoryResponse>;

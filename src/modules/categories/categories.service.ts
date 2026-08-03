@@ -17,7 +17,7 @@ import type {
  * There are only a handful, so no pagination - return a plain array.
  */
 export async function listCategories() {
-  return prisma.category.findMany({ orderBy: { name: "asc" } }); //return in array
+  return prisma.category.findMany({ orderBy: { name: "asc" } });
 }
 
 /** One category, or a 404 if it does not exist. */
