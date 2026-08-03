@@ -8,9 +8,15 @@ Two ways in. Docker if you just want it running; local if you are writing code.
 
 ### Everything in Docker
 
+`docker-compose.yml` on its own expects Postgres to already be running on the
+host (see the comment at the top of that file) — that's how the deploy server
+is set up, since it manages its own long-lived Postgres. On a fresh machine
+without that, add the `docker-compose.local.yml` overlay, which brings up its
+own Postgres container instead:
+
 ```bash
-cp .env.example .env      # only JWT_SECRET is read from it, see below
-docker compose up -d --build
+cp .env.example .env      # set DB_PASSWORD and JWT_SECRET
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 ```
 
 That brings up Postgres, applies the migrations in `prisma/migrations`, and
@@ -18,23 +24,25 @@ starts the API on <http://localhost:3000> — check
 <http://localhost:3000/health/db>, and read the API at
 <http://localhost:3000/docs>.
 
-The app container ignores `DATABASE_URL` from `.env`: compose points it at its
-own `postgres` service, since `localhost` inside a container is the container.
-Everything else comes from `.env` — `JWT_SECRET` is required, and `PORT` only
-picks the *host* port (`PORT=8080` publishes the API on 8080).
+Everything comes from `.env` — `DB_PASSWORD` and `JWT_SECRET` are required,
+and `PORT` only picks the *host* port (`PORT=8080` publishes the API on 8080).
 
 ```bash
-docker compose logs -f app                  # follow the API
-docker compose --profile seed run --rm seed # optional: fake data
-docker compose down                         # add -v to drop the database too
+docker compose -f docker-compose.yml -f docker-compose.local.yml logs -f app
+docker compose -f docker-compose.yml -f docker-compose.local.yml --profile seed run --rm seed # optional: fake data
+docker compose -f docker-compose.yml -f docker-compose.local.yml down # add -v to drop the database too
 ```
+
+If you already have Postgres running some other way, skip the overlay and
+just run `docker compose up -d --build` with `DATABASE_URL` in `.env` pointed
+at it instead.
 
 ### Locally, against a database in Docker
 
 ```bash
 npm install
-cp .env.example .env      # then edit DATABASE_URL, and set JWT_SECRET
-docker compose up -d postgres  # or point DATABASE_URL at your own
+cp .env.example .env      # then edit DATABASE_URL, and set DB_PASSWORD/JWT_SECRET
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d postgres
 npm run prisma:migrate    # create the schema + generate the client
 npm run prisma:seed       # optional: fill the database with fake data
 ```

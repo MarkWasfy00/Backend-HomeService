@@ -1,0 +1,45 @@
+# Overlay for running fully locally, with Postgres in a container instead of
+# on the host. Not auto-loaded - combine it explicitly:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+#
+# The server's plain `docker compose up -d --build` (no -f) is unaffected by
+# this file's existence, so it stays pointed at the host's real Postgres.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: homeservice-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env - see .env.example}
+      POSTGRES_DB: homeservice
+    ports:
+      - "5432:5432"
+    volumes:
+      - homeservice-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d homeservice"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # No sslmode on this URL - the local Postgres container speaks plaintext,
+  # and src/core/db-url.ts leaves pg on its default of no TLS when sslmode is
+  # absent, which is what it expects.
+  migrate:
+    environment:
+      DATABASE_URL: postgresql://appuser:${DB_PASSWORD:?set DB_PASSWORD in .env - see .env.example}@postgres:5432/homeservice?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    environment:
+      DATABASE_URL: postgresql://appuser:${DB_PASSWORD:?set DB_PASSWORD in .env - see .env.example}@postgres:5432/homeservice?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  homeservice-pgdata:
