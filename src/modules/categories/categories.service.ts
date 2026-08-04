@@ -1,5 +1,6 @@
 import { prisma } from "../../core/prisma.js";
 import { ApiError } from "../../core/errors.js";
+import { messages } from "../../core/messages.js";
 import type {
   CreateCategoryBody,
   UpdateCategoryBody,
@@ -25,7 +26,7 @@ export async function getCategoryById(id: bigint) {
   const category = await prisma.category.findUnique({ where: { id } });
 
   if (!category) {
-    throw ApiError.notFound("Category not found");
+    throw ApiError.notFound(messages.categories.notFound);
   }
 
   return category;

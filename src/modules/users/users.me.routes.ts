@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { ApiError } from "../../core/errors.js";
+import { messages } from "../../core/messages.js";
 import { currentUser } from "../auth/auth.middleware.js";
 import { toTechnicianProfileResponse } from "../technicians/technicians.mapper.js";
 import * as techniciansService from "../technicians/technicians.service.js";
@@ -84,12 +85,15 @@ usersMeRoutes.patch("/role", async (req, res) => {
 });
 
 /**
- * The three file fields a technician may send. Declaring them is also what
+ * The two file fields a technician may send. Declaring them is also what
  * rejects everything else: any other file field is a LIMIT_UNEXPECTED_FILE,
  * which the error handler turns into a 400 rather than silently ignoring it.
+ *
+ * `nationalId` is not among them on purpose - it is a text field now, the 14
+ * digits themselves, so it arrives in the body and `signUpBody` validates it.
+ * A client still attaching it as a file gets that same 400.
  */
 const documentFields = [
-  { name: "nationalId", maxCount: 1 },
   { name: "criminalRecordFile", maxCount: 1 },
   { name: "profileImage", maxCount: 1 },
 ];
@@ -160,7 +164,8 @@ usersMeRoutes.post(
  * Joins the parsed form fields to the files that came with them, which is where
  * the two role-specific rules about files live:
  *
- *   TECHNICIAN  the national id is required, the other two are optional
+ *   TECHNICIAN  both files are optional - the national id, the one thing that
+ *               is required, is text and `signUpBody` has already checked it
  *   CUSTOMER    no files at all - `User` has no column to put one in
  *
  * A customer who attaches a file is told so rather than having it quietly
@@ -176,26 +181,17 @@ function withDocuments(
 
     if (attached.length > 0) {
       throw ApiError.badRequest(
-        `A customer account has nowhere to store files, but ${attached.join(", ")} was attached. Send documents only with role=TECHNICIAN.`,
+        messages.users.customerCannotAttachFiles(attached),
       );
     }
 
     return body;
   }
 
-  const nationalId = files.nationalId;
-
-  if (!nationalId) {
-    throw ApiError.badRequest(
-      "nationalId is required for a technician - attach the file as multipart/form-data",
-    );
-  }
-
   return {
     ...body,
     // What is stored is the URL, never the file - the same string
     // POST /technician/profile is handed by a client that uploaded separately.
-    nationalId: publicUrlFor(nationalId),
     criminalRecordFile:
       files.criminalRecordFile && publicUrlFor(files.criminalRecordFile),
     profileImage: files.profileImage && publicUrlFor(files.profileImage),

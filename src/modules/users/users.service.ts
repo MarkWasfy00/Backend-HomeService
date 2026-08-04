@@ -2,6 +2,7 @@ import type { Prisma } from "../../generated/prisma/client.js";
 import type { UserStatus } from "../../generated/prisma/enums.js";
 import { prisma } from "../../core/prisma.js";
 import { ApiError } from "../../core/errors.js";
+import { messages } from "../../core/messages.js";
 import { skipTake } from "../../core/pagination.js";
 import type { TechnicianDocuments } from "../technicians/technicians.schema.js";
 import * as techniciansService from "../technicians/technicians.service.js";
@@ -64,7 +65,7 @@ export async function getUserById(id: bigint) {
   const user = await findUserById(id);
 
   if (!user) {
-    throw ApiError.notFound("User not found");
+    throw ApiError.notFound(messages.users.notFound);
   }
 
   return user;
@@ -91,19 +92,17 @@ export async function selectRole(userId: bigint, role: SelectRoleBody["role"]) {
   });
 
   if (!user) {
-    throw ApiError.notFound("User not found");
+    throw ApiError.notFound(messages.users.notFound);
   }
 
   // Once onboarding is done the role is settled. Changing it afterwards would
   // strand a technician's profile, reviews and offers on a customer account.
   if (user.technicianProfile) {
-    throw ApiError.conflict(
-      "Documents were already submitted, the role can no longer change",
-    );
+    throw ApiError.conflict(messages.users.roleLockedByDocuments);
   }
 
   if (user.status !== "PENDING") {
-    throw ApiError.conflict("This account has already finished signing up");
+    throw ApiError.conflict(messages.users.signUpAlreadyFinished);
   }
 
   const updated = await updateUserFields(userId, { role });
@@ -129,7 +128,7 @@ export async function completeCustomerProfile(
   // The same guard selectRole uses. Without it this endpoint would reset a
   // finished account's details, and re-activate a suspended one.
   if (user.status !== "PENDING") {
-    throw ApiError.conflict("This account has already finished signing up");
+    throw ApiError.conflict(messages.users.signUpAlreadyFinished);
   }
 
   return updateUserFields(userId, { ...data, status: "ACTIVE" });
@@ -171,20 +170,18 @@ export async function signUp(userId: bigint, data: SignUpData) {
   });
 
   if (!user) {
-    throw ApiError.notFound("User not found");
+    throw ApiError.notFound(messages.users.notFound);
   }
 
   // The two guards selectRole uses, for the same reasons: signing up twice
   // would reset a finished account's details, re-activate a suspended one, or
   // strand a technician's documents on an account that just became a customer.
   if (user.technicianProfile) {
-    throw ApiError.conflict(
-      "Documents were already submitted, this account cannot sign up again",
-    );
+    throw ApiError.conflict(messages.users.documentsAlreadySubmitted);
   }
 
   if (user.status !== "PENDING") {
-    throw ApiError.conflict("This account has already finished signing up");
+    throw ApiError.conflict(messages.users.signUpAlreadyFinished);
   }
 
   if (data.role === "TECHNICIAN") {
@@ -225,7 +222,7 @@ async function updateUserFields(id: bigint, data: Prisma.UserUpdateManyMutationI
   });
 
   if (count === 0) {
-    throw ApiError.notFound("User not found");
+    throw ApiError.notFound(messages.users.notFound);
   }
 
   return getUserById(id);
@@ -244,6 +241,6 @@ export async function softDeleteUser(id: bigint) {
   });
 
   if (count === 0) {
-    throw ApiError.notFound("User not found");
+    throw ApiError.notFound(messages.users.notFound);
   }
 }

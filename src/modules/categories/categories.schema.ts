@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idParams } from "../../core/fields.js";
+import { messages } from "../../core/messages.js";
 
 // TASK 1 - Categories. See docs/ONBOARDING-FLOW.md.
 // Copy the shape of src/modules/users/users.schema.ts.
@@ -16,7 +17,7 @@ const homeVisitBasePrice = z.coerce
   .positive()
   .max(99_999_999.99)
   .refine((n) => Number(n.toFixed(2)) === n, {
-    message: "homeVisitBasePrice can have at most 2 decimal places",
+    message: messages.fields.priceDecimals,
   })
   .transform((n) => n.toFixed(2));
 
@@ -37,7 +38,7 @@ export const createCategoryBody = z.object({
 export const updateCategoryBody = createCategoryBody
   .partial()
   .refine((body) => Object.keys(body).length > 0, {
-    message: "Provide at least one field to update",
+    message: messages.fields.atLeastOneFieldToUpdate,
   });
 
 export type CreateCategoryBody = z.infer<typeof createCategoryBody>;

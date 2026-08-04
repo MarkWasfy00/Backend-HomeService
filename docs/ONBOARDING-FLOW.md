@@ -194,8 +194,8 @@ The technician response also carries `technicianProfile`.
   "longitude": 31.2357,
 
   "categoryId": "1",                            // picked back on screen 3
-  "nationalId": "/uploads/1712-nid.jpg",        // URL from POST /public/uploads
-  "criminalRecordFile": "/uploads/1712-rec.pdf",// optional
+  "nationalId": "29805150101234",               // the 14 digits, as text
+  "criminalRecordFile": "/uploads/1712-rec.pdf",// optional, URL from POST /public/uploads
   "profileImage": "/uploads/1712-me.jpg"        // optional
 }
 ```
@@ -222,10 +222,14 @@ POST /api/v1/me/signup       Authorization: Bearer <accessToken>
 | `latitude`           | required | required   | |
 | `longitude`          | required | required   | |
 | `role`               | required | required   | `CUSTOMER` or `TECHNICIAN` |
-| `categoryId`         | rejected | required   | from `GET /public/categories` |
-| `nationalId`         | rejected | required   | **the file**, not a URL |
+| `categoryId`         | dropped  | required   | from `GET /public/categories` |
+| `nationalId`         | dropped  | required   | **text** — the 14 digits, not a file |
 | `criminalRecordFile` | rejected | optional   | the file |
 | `profileImage`       | rejected | optional   | the file |
+
+A customer who attaches a *file* gets a `400`, not a silent drop — the
+alternative is a technician who picked the wrong role watching their documents
+vanish. The two technician-only text fields are simply ignored.
 
 The response is the contract above plus `technicianProfile`, which is `null`
 for a customer. `accountState` is `READY` for a customer and
@@ -252,7 +256,7 @@ Files land in `UPLOAD_DIR` (default `uploads/`) and are served back under
 
 Handled:
 
-- **Type and size.** jpeg / png / pdf, 5 MB, 3 files per request.
+- **Type and size.** jpeg / png / pdf, 5 MB, 2 files per request.
 - **The filename.** Never reused from the client — it is
   `${Date.now()}-${randomUUID()}` plus an extension taken from our own mime
   table, so `../` and double extensions cannot get through.
@@ -269,8 +273,9 @@ Not handled — decide these before real identity documents go through:
 
 - **The URL is the only credential.** Anyone holding it can read the file; the
   random name is all that protects it. That is why
-  `toTechnicianProfileResponse` never returns `nationalId` to a non-admin. Signed
-  URLs, or serving documents through an authenticated route, is the fix.
+  `toTechnicianProfileResponse` never returns `criminalRecordFile` — or the
+  `nationalId` number itself — to a non-admin. Signed URLs, or serving documents
+  through an authenticated route, is the fix.
 - **Nothing is ever deleted.** Soft-deleting a user leaves their documents on
   disk forever, and there is no retention policy or disk quota. Growth is
   unbounded.
@@ -423,7 +428,10 @@ personal details **and** their documents. Import `profileFields` from
 - Return `accountState: "WAITING_FOR_APPROVAL"` and its `message` alongside the
   profile, so the app can show the "under review" screen straight away instead
   of making a second call. Get both from `modules/users/users.state.js`.
-- `nationalId` and `criminalRecordFile` are **URL strings**, not files. The
+- `nationalId` is the **14 digits off the card**, as text. `core/national-id.ts`
+  checks the century digit, the birth date and the governorate code before it
+  reaches the database.
+- `criminalRecordFile` and `profileImage` are **URL strings**, not files. The
   upload happens first (task 4) and the client sends back the returned URLs.
 
 ## Task 4 — File upload

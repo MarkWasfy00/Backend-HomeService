@@ -2,6 +2,8 @@ import { z } from "zod";
 import { UserRole, UserStatus } from "../../generated/prisma/enums.js";
 import { paginationQuery } from "../../core/pagination.js";
 import { idField, idParams, phoneField as phone } from "../../core/fields.js";
+import { messages } from "../../core/messages.js";
+import { nationalIdField } from "../../core/national-id.js";
 
 // Every shape the users API accepts is declared here, and nowhere else.
 // Routes call `someSchema.parse(...)`; a failure is turned into a 400 by the
@@ -48,7 +50,7 @@ export const updateUserBody = z
   .object({ ...profileFields, phone })
   .partial()
   .refine((body) => Object.keys(body).length > 0, {
-    message: "Provide at least one field to update",
+    message: messages.fields.atLeastOneFieldToUpdate,
   });
 
 /**
@@ -85,14 +87,16 @@ export const selectRoleBody = z.object({
  *
  * The text half of a `multipart/form-data` body: the profile fields every user
  * gives, the role they picked, and - for a technician - the category they work
- * in. The files themselves are not described here; multer takes them off the
- * request and the route turns them into the URLs the service stores.
+ * in and their national id. The files themselves are not described here; multer
+ * takes them off the request and the route turns them into the URLs the service
+ * stores.
  *
  * A discriminated union rather than one flat object with optional fields,
- * because `categoryId` is not "optional" - it is required of a technician and
- * meaningless for a customer. This way a technician who forgets it gets a
- * `categoryId` error rather than a foreign key failure three layers down, and
- * a customer who sends one is told plainly that it does not belong.
+ * because `categoryId` and `nationalId` are not "optional" - they are required
+ * of a technician and meaningless for a customer. This way a technician who
+ * forgets one gets a proper field error rather than a foreign key failure three
+ * layers down, and neither field can be smuggled onto a customer's account -
+ * the customer branch has nowhere to put them, so they are dropped.
  *
  * Multipart delivers every value as a string, which is why the numeric fields
  * coerce (`profileFields`) and `categoryId` reuses `idField` - the same
@@ -105,6 +109,8 @@ export const signUpBody = z.discriminatedUnion("role", [
     role: z.literal(UserRole.TECHNICIAN),
     // The speciality picked on the category screen.
     categoryId: idField,
+    // Typed in on the documents screen, alongside the files.
+    nationalId: nationalIdField,
   }),
 ]);
 

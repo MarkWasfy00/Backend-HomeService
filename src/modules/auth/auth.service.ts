@@ -2,6 +2,7 @@ import type { User } from "../../generated/prisma/client.js";
 import { prisma } from "../../core/prisma.js";
 import { ApiError } from "../../core/errors.js";
 import { isProduction } from "../../core/env.js";
+import { messages } from "../../core/messages.js";
 import { sendOtpSms } from "./auth.sms.js";
 import { issueTokens, verifyToken } from "./auth.tokens.js";
 
@@ -44,9 +45,7 @@ export async function requestOtp(phone: string) {
   const now = new Date();
 
   if (latest?.blockedUntil && latest.blockedUntil > now) {
-    throw tooManyRequests(
-      "Too many wrong codes. Try again in a few minutes.",
-    );
+    throw tooManyRequests(messages.auth.otpBlocked());
   }
 
   if (latest) {
@@ -54,7 +53,7 @@ export async function requestOtp(phone: string) {
 
     if (secondsSinceLast < RESEND_COOLDOWN_SECONDS) {
       const wait = Math.ceil(RESEND_COOLDOWN_SECONDS - secondsSinceLast);
-      throw tooManyRequests(`Wait ${wait}s before asking for another code.`);
+      throw tooManyRequests(messages.auth.resendTooSoon(wait));
     }
   }
 
@@ -88,19 +87,19 @@ export async function verifyOtp(phone: string, otpCode: string) {
   const now = new Date();
 
   if (!otp) {
-    throw ApiError.badRequest("Ask for a code first");
+    throw ApiError.badRequest(messages.auth.otpNotRequested);
   }
 
   if (otp.blockedUntil && otp.blockedUntil > now) {
-    throw tooManyRequests("Too many wrong codes. Try again in a few minutes.");
+    throw tooManyRequests(messages.auth.otpBlocked());
   }
 
   if (otp.verifiedAt) {
-    throw ApiError.badRequest("This code was already used");
+    throw ApiError.badRequest(messages.auth.otpAlreadyUsed);
   }
 
   if (otp.expiresAt < now) {
-    throw ApiError.badRequest("This code has expired, ask for a new one");
+    throw ApiError.badRequest(messages.auth.otpExpired);
   }
 
   if (otp.otpCode !== otpCode) {
@@ -116,14 +115,10 @@ export async function verifyOtp(phone: string, otpCode: string) {
     });
 
     if (isBlocked) {
-      throw tooManyRequests(
-        `Too many wrong codes. Try again in ${BLOCK_MINUTES} minutes.`,
-      );
+      throw tooManyRequests(messages.auth.otpBlocked(BLOCK_MINUTES));
     }
 
-    throw ApiError.badRequest(
-      `Wrong code. ${MAX_ATTEMPTS - attempts} attempt(s) left.`,
-    );
+    throw ApiError.badRequest(messages.auth.otpWrong(MAX_ATTEMPTS - attempts));
   }
 
   // Burn the code so it cannot be replayed.
@@ -155,7 +150,7 @@ export async function refreshSession(refreshToken: string) {
   });
 
   if (!user) {
-    throw ApiError.unauthorized("This account no longer exists");
+    throw ApiError.unauthorized(messages.auth.accountGone);
   }
 
   assertAccountIsUsable(user);
@@ -175,8 +170,12 @@ export async function refreshSession(refreshToken: string) {
  * not one of them - that is just an unfinished profile.
  */
 export function assertAccountIsUsable(user: User) {
-  if (user.status === "BLOCKED" || user.status === "SUSPENDED") {
-    throw ApiError.forbidden(`This account is ${user.status.toLowerCase()}`);
+  if (user.status === "BLOCKED") {
+    throw ApiError.forbidden(messages.auth.accountBlocked);
+  }
+
+  if (user.status === "SUSPENDED") {
+    throw ApiError.forbidden(messages.auth.accountSuspended);
   }
 }
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { messages } from "./messages.js";
 
 /**
  * Field rules that more than one module needs. Keeping them here means a rule
@@ -11,12 +12,12 @@ import { z } from "zod";
 export const phoneField = z
   .string()
   .trim()
-  .regex(/^\+?\d{7,19}$/, "phone must be 7-20 digits, optionally with a +");
+  .regex(/^\+?\d{7,19}$/, messages.fields.phone);
 
 /** Our primary keys are BigInt, but a URL always hands us a string. */
 export const idField = z
   .string()
-  .regex(/^\d+$/, "id must be a positive number")
+  .regex(/^\d+$/, messages.fields.id)
   .transform(BigInt);
 
 /** `:id` in a URL. Reuse with `z.object({ id: idField })` shape below. */

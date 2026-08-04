@@ -1,19 +1,19 @@
 # What to build
 
-31 functions, 5 tasks — tasks 2 and 3 are already done, so 23 are left. The files
+31 functions, 5 tasks — tasks 1, 2 and 3 are done, so 10 are left. The files
 already exist and are already plugged into the API — each has a
 `throw ApiError.notImplemented()` where your code goes, and a `TODO` comment
 with the details.
 
 | Task | What | Items | Who |
 | ---- | ---- | ----- | --- |
-| 1 | Categories | 13 | |
+| 1 | Categories | 13 | ✅ done |
 | 2 | Customer profile | 3 | ✅ done |
 | 3 | Technician profile | 5 | ✅ done |
 | 4 | File upload | 3 | |
 | 5 | Admin approval | 7 | |
 
-Order: **1 → 4 → 5.** Tasks 2 and 3 are finished; read them as the worked
+Order: **4 → 5.** Tasks 1, 2 and 3 are finished; read them as the worked
 examples — and note that task 5 touches the same files as task 3.
 
 ## Setup
@@ -79,38 +79,43 @@ routes  →  service  →  database
 
 ---
 
-# Task 1 — Categories
+# Task 1 — Categories ✅ done
 
 The list of fields (plumbing, electrical…) shown on screen 3, plus admin
 management. Start here.
 
 **`categories.schema.ts`**
 
-- [ ] `createCategoryBody` — `name` (2–100), `homeVisitBasePrice` (positive, 2dp)
-- [ ] `updateCategoryBody` — both optional, reject `{}`. Copy `updateUserBody`.
+- [x] `createCategoryBody` — `name` (2–100), `homeVisitBasePrice` (positive, 2dp)
+- [x] `updateCategoryBody` — both optional, reject `{}`. Copy `updateUserBody`.
 
 **`categories.service.ts`**
 
-- [ ] `listCategories()` — all, ordered by name. No pagination.
-- [ ] `getCategoryById(id)` — or `throw ApiError.notFound("Category not found")`
-- [ ] `createCategory(data)` — `name` is unique, duplicates 409 by themselves
-- [ ] `updateCategory(id, data)` — missing row 404s by itself
-- [ ] `deleteCategory(id)` — real delete. In use → 409, which is correct.
+- [x] `listCategories()` — all, ordered by name. No pagination.
+- [x] `getCategoryById(id)` — or `throw ApiError.notFound("Category not found")`
+- [x] `createCategory(data)` — `name` is unique, duplicates 409 by themselves
+- [x] `updateCategory(id, data)` — missing row 404s by itself
+- [x] `deleteCategory(id)` — real delete. In use → 409, which is correct.
 
 **`categories.mapper.ts`**
 
-- [ ] `toCategoryResponse(category)` — id as string, price as string
+- [x] `toCategoryResponse(category)` — id as string, price as string
 
 **`categories.public.routes.ts`**
 
-- [ ] `GET /` → `{ data: [...] }`, no `meta`
+- [x] `GET /` → `{ data: [...] }`, no `meta`
 
 **`categories.admin.routes.ts`**
 
-- [ ] `GET /:id` → 200
-- [ ] `POST /` → 201
-- [ ] `PATCH /:id` → 200
-- [ ] `DELETE /:id` → 204, empty
+- [x] `GET /:id` → 200
+- [x] `POST /` → 201
+- [x] `PATCH /:id` → 200
+- [x] `DELETE /:id` → 204, empty
+
+The price is capped at `99999999.99` to match the `Decimal(10, 2)` column, so an
+oversized price is a 400 rather than a 500. The Swagger bodies for these two
+endpoints are generated from the zod schemas with `fromZod`, so the constraints
+above only need changing in one place.
 
 ### Test it
 
@@ -176,7 +181,8 @@ read it before starting task 2, it is the same job with a bigger payload.
 **`technicians.schema.ts`**
 
 - [x] `createTechnicianProfileBody` — `profileFields` (imported from
-      `users.schema.ts`), `categoryId`, `nationalId`, optional
+      `users.schema.ts`), `categoryId`, `nationalId` (the 14 digits as text —
+      `nationalIdField` from `core/national-id.ts` checks them), optional
       `criminalRecordFile` and `profileImage`. No `userId` — the route passes
       `currentUser(req).id` to the service.
 
@@ -209,7 +215,7 @@ curl -X POST localhost:3000/api/v1/technician/profile \
   -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"fullName":"Karim","city":"Cairo","address":"5 Tahrir",
        "latitude":30.0444,"longitude":31.2357,"categoryId":"1",
-       "nationalId":"/uploads/nid.jpg"}'
+       "nationalId":"29805150101234"}'
 ```
 
 201 with `WAITING_FOR_APPROVAL`. Log in again → still `WAITING_FOR_APPROVAL`,

@@ -2,6 +2,7 @@ import type {
   TechnicianProfile,
   User,
 } from "../../generated/prisma/client.js";
+import { messages } from "../../core/messages.js";
 
 /**
  * Where an account is in its journey, and therefore which screen the app shows
@@ -32,18 +33,20 @@ export type AccountState =
   | "BLOCKED"
   | "SUSPENDED";
 
-/** A default sentence per state. The app is free to show its own wording. */
+/**
+ * A default sentence per state, in Arabic like every other sentence the API
+ * says. The app is free to show its own wording - this is what it gets if it
+ * has none. The state name next to it is the machine-readable half and stays
+ * English; see core/messages.ts for that split.
+ */
 export const accountStateMessage: Record<AccountState, string> = {
-  COMPLETE_PROFILE: "Please complete your profile",
-  SUBMIT_DOCUMENTS:
-    "Please upload your national ID and criminal record to finish signing up",
-  WAITING_FOR_APPROVAL:
-    "Your documents are under review. You will be notified once an admin approves your account.",
-  VERIFICATION_REJECTED:
-    "Your documents were rejected. Please upload them again.",
-  READY: "Your account is ready",
-  BLOCKED: "This account is blocked",
-  SUSPENDED: "This account is suspended",
+  COMPLETE_PROFILE: messages.accountState.completeProfile,
+  SUBMIT_DOCUMENTS: messages.accountState.submitDocuments,
+  WAITING_FOR_APPROVAL: messages.accountState.waitingForApproval,
+  VERIFICATION_REJECTED: messages.accountState.verificationRejected,
+  READY: messages.accountState.ready,
+  BLOCKED: messages.accountState.blocked,
+  SUSPENDED: messages.accountState.suspended,
 };
 
 /**

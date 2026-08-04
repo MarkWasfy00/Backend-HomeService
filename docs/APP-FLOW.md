@@ -174,7 +174,7 @@ Authorization: Bearer <accessToken>
   "data": {
     "user": { … "role": "TECHNICIAN" },
     "accountState": "SUBMIT_DOCUMENTS",
-    "message": "Please upload your national ID and criminal record to finish signing up"
+    "message": "Please enter your national ID and upload your criminal record to finish signing up"
   }
 }
 ```
@@ -220,7 +220,7 @@ POST /public/uploads          multipart/form-data, field name "file"
 
 ```jsonc
 // 201
-{ "data": { "url": "/uploads/1712345678-national-id.jpg" } }
+{ "data": { "url": "/uploads/1712345678-criminal-record.pdf" } }
 ```
 
 jpeg / png / pdf, max 5 MB. Call it once per file.
@@ -232,8 +232,8 @@ Authorization: Bearer <accessToken>
   "latitude": 30.0444, "longitude": 31.2357,
 
   "categoryId": "1",                              // from screen 3
-  "nationalId": "/uploads/1712-nid.jpg",          // from the upload above
-  "criminalRecordFile": "/uploads/1712-rec.pdf",  // optional
+  "nationalId": "29805150101234",                 // the 14 digits, typed in
+  "criminalRecordFile": "/uploads/1712-rec.pdf",  // optional, from the upload above
   "profileImage": "/uploads/1712-me.jpg" }        // optional
 ```
 
@@ -274,12 +274,31 @@ Content-Type: multipart/form-data
 | `longitude`          | required | required   | −180…180 |
 | `role`               | required | required   | `CUSTOMER` or `TECHNICIAN` |
 | `categoryId`         | ✗        | required   | the id from screen 3 |
-| `nationalId`         | ✗        | required   | **the file** — jpeg/png/pdf, ≤ 5 MB |
-| `criminalRecordFile` | ✗        | optional   | the file |
+| `nationalId`         | ✗        | required   | **text**, the 14 digits off the card |
+| `criminalRecordFile` | ✗        | optional   | the file — jpeg/png/pdf, ≤ 5 MB |
 | `profileImage`       | ✗        | optional   | the file |
 
-✗ means sending it is a `400`, not that it is ignored — so a technician who
-picked the wrong role finds out instead of losing their documents silently.
+✗ means the field does not belong to that role. Attaching a *file* as a customer
+is a `400` rather than a silent drop, so a technician who picked the wrong role
+finds out instead of losing their documents; the text-only `categoryId` and
+`nationalId` are simply dropped.
+
+`nationalId` is a text field, not an upload — attaching it as a file is a `400`.
+It has to be 14 digits that actually spell out a card:
+
+```
+2 98 05 15 01 0123 4    → 29805150101234
+^ ^  ^  ^  ^  ^    check digit (not verified — the algorithm is not public)
+| |  |  |  |  serial
+| |  |  |  governorate, 01–35 or 88 for born abroad
+| |  |  day
+| |  month
+| year
+century: 2 = 1900s, 3 = 2000s
+```
+
+The birth date has to be a real, past date, so `2981315…` (month 13) and
+`2980230…` (30 February) come back as a `400` naming the digits at fault.
 
 A customer sends no files at all, so you can post plain JSON for them if that
 is easier:
@@ -311,7 +330,7 @@ What can come back instead:
 
 | Status | When |
 | ------ | ---- |
-| `400` | a missing or malformed field, a file over 5 MB, a type that is not jpeg/png/pdf, a customer that attached a file, or a technician that forgot `nationalId` |
+| `400` | a missing or malformed field, a national id that is not 14 valid digits, a file over 5 MB, a type that is not jpeg/png/pdf, a customer that attached a file, or a technician that forgot `nationalId` |
 | `409` | this account already finished signing up — go to the waiting screen or the profile screen, do not retry |
 | `401` | no token, or an expired one — refresh it |
 

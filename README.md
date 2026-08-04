@@ -139,6 +139,8 @@ src/
     env.ts                    validated environment variables
     prisma.ts                 PrismaClient singleton
     fields.ts                 field rules shared by modules (phone, id)
+    messages.ts               every sentence the API says, in Arabic
+    zod-arabic.ts             Arabic wording for zod's own messages
     errors.ts                 ApiError
     error-handler.ts          turns any error into a JSON response
     pagination.ts             ?page= & ?limit= helpers
@@ -215,9 +217,9 @@ ending in the same rows:
 - *Step by step*: `PATCH /me/role`, then `POST /customer/profile` or
   `POST /technician/profile` (which takes URLs from `POST /public/uploads`).
 - *All at once*: `POST /me/signup`, one `multipart/form-data` request carrying
-  the profile, the role, and — for a technician — `categoryId` plus the
-  `nationalId` / `criminalRecordFile` / `profileImage` **files themselves**.
-  A customer sends no files, so plain JSON works for them too.
+  the profile, the role, and — for a technician — `categoryId`, the 14-digit
+  `nationalId` as text, plus the `criminalRecordFile` / `profileImage` **files
+  themselves**. A customer sends no files, so plain JSON works for them too.
 
 Uploads are JPEG, PNG or PDF, at most 5 MB, renamed by the server and written
 to `UPLOAD_DIR` (default `uploads/`), then served back under `/uploads/…` with
@@ -264,6 +266,13 @@ Errors — always the same shape, so the mobile app can handle them in one place
 
 `400` invalid body/query · `401` missing/expired token · `403` wrong role or a
 blocked account · `404` missing · `409` duplicate phone · `500` bug.
+
+`message` is Egyptian Arabic and ready to show to the user as-is — the app ships
+in Egypt, so there is one locale and no switcher. `code` is English and stable:
+switch on it, never on the wording, which is free to change. Same split inside
+`details`, where `field` is the English JSON field name and `message` is Arabic.
+All of the copy lives in `src/core/messages.ts` — reword it there, not at the
+`throw`.
 
 ### Try it
 

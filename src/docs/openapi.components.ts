@@ -296,8 +296,8 @@ export const schemas: Record<string, JsonSchema> = {
       object({
         nationalId: {
           type: "string",
-          description: "URL of the uploaded national ID.",
-          example: "/uploads/1712345678-national-id.jpg",
+          description: "The 14 digits of the technician's national ID.",
+          example: "29805150101234",
         },
         criminalRecordFile: nullable({
           type: "string",
@@ -395,8 +395,9 @@ export const schemas: Record<string, JsonSchema> = {
   /** A default sentence per state. The app may show its own wording instead. */
   AccountStateMessage: {
     type: "string",
-    description: "A ready-made sentence for the state above.",
-    example: "Please complete your profile",
+    description:
+      "A ready-made sentence for the state above, in Arabic - the app ships in Egypt. Switch on the state, not on this string.",
+    example: "من فضلك كمّل بياناتك",
   },
 
   /** From `paginationMeta` in core/pagination.ts. */
@@ -424,14 +425,27 @@ export const schemas: Record<string, JsonSchema> = {
           code: {
             type: "string",
             description:
-              "Machine-readable: `validation_error`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `too_many_requests`, `not_implemented`, `internal_error`.",
+              "Machine-readable and always English - switch on this, never on `message`: `validation_error`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `too_many_requests`, `not_implemented`, `internal_error`.",
             example: "validation_error",
           },
-          message: { type: "string", example: "The request body is invalid" },
+          message: {
+            type: "string",
+            description:
+              "Arabic, ready to show to the user as-is. Wording may change at any time.",
+            example: "في بيانات ناقصة أو مكتوبة غلط",
+          },
           details: {
             description:
-              "Present on validation errors (a list of `{ field, message }`) and on some conflicts.",
-            examples: [[{ field: "phone", message: "Invalid phone" }]],
+              "Present on validation errors (a list of `{ field, message }`) and on some conflicts. `field` is the English JSON field name; `message` is Arabic.",
+            examples: [
+              [
+                {
+                  field: "phone",
+                  message:
+                    "رقم التليفون لازم يكون من 7 لـ 20 رقم، وممكن يبدأ بعلامة +",
+                },
+              ],
+            ],
           },
         },
         required: ["code", "message"],

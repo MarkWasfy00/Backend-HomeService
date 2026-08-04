@@ -6,6 +6,7 @@ import type { Request } from "express";
 import multer from "multer";
 import { env } from "../../core/env.js";
 import { ApiError } from "../../core/errors.js";
+import { messages } from "../../core/messages.js";
 
 /**
  * Everything about *storing* an uploaded file: where it goes, what is allowed
@@ -57,7 +58,7 @@ const storage = multer.diskStorage({
 
     // The uuid is what makes the URL unguessable, which matters: the files are
     // served back as static content, so the name is the only thing standing
-    // between a national ID and anyone who asks for it.
+    // between a criminal record and anyone who asks for it.
     callback(null, `${Date.now()}-${randomUUID()}${extension}`);
   },
 });
@@ -73,14 +74,16 @@ const storage = multer.diskStorage({
  */
 export const upload = multer({
   storage,
-  limits: { fileSize: MAX_FILE_SIZE_BYTES, files: 3 },
+  // Two, because that is the most any route accepts: the criminal record and
+  // the profile photo. The national id is text and never arrives as a file.
+  limits: { fileSize: MAX_FILE_SIZE_BYTES, files: 2 },
   fileFilter(_req, file, callback) {
     if (!isAllowedMimeType(file.mimetype)) {
       callback(
         new ApiError(
           400,
           "unsupported_file_type",
-          `${file.fieldname} must be a JPEG, PNG or PDF, not ${file.mimetype}`,
+          messages.uploads.unsupportedType(file.fieldname, file.mimetype),
         ),
       );
       return;

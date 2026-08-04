@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idField, idParams } from "../../core/fields.js";
+import { nationalIdField } from "../../core/national-id.js";
 import { paginationQuery } from "../../core/pagination.js";
 import { profileFields } from "../users/users.schema.js";
 
@@ -9,16 +10,16 @@ export const technicianIdParams = idParams;
 
 /**
  * A file the client already uploaded: the URL that POST /public/uploads gave
- * back, e.g. "/uploads/1712345678-national-id.jpg". Never the file itself, and
- * for the national id never the number either. 255 is the column width.
+ * back, e.g. "/uploads/1712345678-criminal-record.pdf". Never the file itself.
+ * 255 is the column width.
  */
 const uploadedFileUrl = z.string().trim().min(1).max(255);
 
 /**
- * The three files a technician profile is built from, as the URLs they are
- * stored under. Only the national id is required; the criminal record and the
- * technician's own photo are nullable columns, so the app may send them later
- * or not at all.
+ * The two files a technician profile can carry, as the URLs they are stored
+ * under. Both are optional: the criminal record and the technician's own photo
+ * are nullable columns, so the app may send them later or not at all. The
+ * national id is not here - it is the number itself, `nationalIdField` below.
  *
  * Its own schema because two endpoints end up holding exactly this shape:
  * `POST /technician/profile`, where the client sends URLs it got from
@@ -27,7 +28,6 @@ const uploadedFileUrl = z.string().trim().min(1).max(255);
  * result to the same service.
  */
 const technicianDocuments = z.object({
-  nationalId: uploadedFileUrl,
   criminalRecordFile: uploadedFileUrl.optional(),
   profileImage: uploadedFileUrl.optional(),
 });
@@ -50,6 +50,10 @@ export const createTechnicianProfileBody = z.object({
 
   // The speciality picked back on screen 3.
   categoryId: idField,
+
+  // The 14 digits off the card, typed in - not a photo of it. See
+  // core/national-id.ts for what makes them valid.
+  nationalId: nationalIdField,
 
   ...technicianDocuments.shape,
 });

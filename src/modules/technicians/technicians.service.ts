@@ -1,5 +1,6 @@
 import { prisma } from "../../core/prisma.js";
 import { ApiError } from "../../core/errors.js";
+import { messages } from "../../core/messages.js";
 import type {
   CreateTechnicianProfileBody,
   ListTechniciansQuery,
@@ -38,14 +39,14 @@ export async function createTechnicianProfile(
   // `tx.user.update` cannot express the soft-delete filter, so the check
   // happens here - a deleted user must not be resurrected as a technician.
   if (!user) {
-    throw ApiError.notFound("User not found");
+    throw ApiError.notFound(messages.users.notFound);
   }
 
   // The same guard selectRole uses. Without it an account that already
   // finished signing up as a customer would be silently turned into a
   // technician and pushed back to the waiting screen.
   if (user.status !== "PENDING") {
-    throw ApiError.conflict("This account has already finished signing up");
+    throw ApiError.conflict(messages.users.signUpAlreadyFinished);
   }
 
   // Submitting twice hits the unique index on userId (P2002 -> 409), and an

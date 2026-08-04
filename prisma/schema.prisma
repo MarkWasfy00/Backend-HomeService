@@ -182,7 +182,9 @@ model TechnicianProfile {
   userId             BigInt             @unique @map("user_id")
   categoryId         BigInt             @map("category_id")
   profileImage       String?            @map("profile_image") @db.VarChar(255)
-  nationalId         String             @map("national_id") @db.VarChar(255)
+  // The 14 digits off the card, not a scan of it. Validated in
+  // src/core/national-id.ts before it ever reaches this column.
+  nationalId         String             @map("national_id") @db.VarChar(14)
   criminalRecordFile String?            @map("criminal_record_file") @db.VarChar(255)
   verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
   isAvailable        Boolean            @default(true) @map("is_available")

@@ -1,11 +1,17 @@
+import { messages } from "./messages.js";
+
 /**
  * The only error type you should throw on purpose.
  *
- *   throw ApiError.notFound("User not found");
+ *   throw ApiError.notFound(messages.users.notFound);
  *
  * The error handler in core/error-handler.ts turns it into a JSON response
  * with the right status code. Anything else that reaches the handler is
  * treated as an unexpected bug and becomes a 500.
+ *
+ * `code` is English and stays that way - it is what the app switches on. The
+ * message is Arabic and comes from core/messages.ts, which is where all of the
+ * user-facing wording lives; do not type a sentence inline here.
  */
 export class ApiError extends Error {
   readonly status: number;
@@ -20,23 +26,23 @@ export class ApiError extends Error {
     this.details = details;
   }
 
-  static badRequest(message = "Bad request", details?: unknown) {
+  static badRequest(message = messages.generic.badRequest, details?: unknown) {
     return new ApiError(400, "bad_request", message, details);
   }
 
-  static unauthorized(message = "Authentication required") {
+  static unauthorized(message = messages.generic.unauthorized) {
     return new ApiError(401, "unauthorized", message);
   }
 
-  static forbidden(message = "You do not have access to this resource") {
+  static forbidden(message = messages.generic.forbidden) {
     return new ApiError(403, "forbidden", message);
   }
 
-  static notFound(message = "Resource not found") {
+  static notFound(message = messages.generic.notFound) {
     return new ApiError(404, "not_found", message);
   }
 
-  static conflict(message = "Resource already exists", details?: unknown) {
+  static conflict(message = messages.generic.conflict, details?: unknown) {
     return new ApiError(409, "conflict", message, details);
   }
 
@@ -44,7 +50,7 @@ export class ApiError extends Error {
    * For an endpoint that exists in the route map but has not been written yet.
    * Delete the throw as soon as you implement the handler.
    */
-  static notImplemented(message = "This endpoint is not built yet") {
+  static notImplemented(message = messages.generic.notImplemented) {
     return new ApiError(501, "not_implemented", message);
   }
 }

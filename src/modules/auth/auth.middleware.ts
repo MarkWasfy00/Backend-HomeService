@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import type { User } from "../../generated/prisma/client.js";
 import type { UserRole } from "../../generated/prisma/enums.js";
 import { ApiError } from "../../core/errors.js";
+import { messages } from "../../core/messages.js";
 import { findUserById } from "../users/users.service.js";
 import { assertAccountIsUsable } from "./auth.service.js";
 import { verifyToken } from "./auth.tokens.js";
@@ -56,9 +57,7 @@ function bearerToken(req: Request): string {
   const match = header?.match(/^Bearer +(.+)$/i);
 
   if (!match?.[1]) {
-    throw ApiError.unauthorized(
-      "Send your access token as: Authorization: Bearer <token>",
-    );
+    throw ApiError.unauthorized(messages.auth.missingBearerToken);
   }
 
   return match[1].trim();
@@ -85,7 +84,7 @@ export async function requireAuth(
   // Signed correctly, but the account was deleted since. Not a 404: as far as
   // the caller is concerned their session is simply no longer good.
   if (!user) {
-    throw ApiError.unauthorized("This account no longer exists");
+    throw ApiError.unauthorized(messages.auth.accountGone);
   }
 
   assertAccountIsUsable(user);
@@ -109,9 +108,7 @@ export function requireRole(...roles: UserRole[]) {
     const user = currentUser(req);
 
     if (!roles.includes(user.role)) {
-      throw ApiError.forbidden(
-        `This endpoint is only for ${roles.join(" and ").toLowerCase()} accounts`,
-      );
+      throw ApiError.forbidden(messages.auth.roleNotAllowed(roles));
     }
 
     next();

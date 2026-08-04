@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import { Prisma } from "../generated/prisma/client.js";
 import { ApiError } from "./errors.js";
 import { isProduction } from "./env.js";
+import { messages } from "./messages.js";
 
 /** Every error response in the app has this shape. */
 type ErrorBody = {
@@ -62,36 +63,37 @@ function foreignKeyMessage(err: Prisma.PrismaClientKnownRequestError): string {
   const original = meta?.driverAdapterError?.cause?.originalMessage ?? "";
 
   if (original.startsWith("insert or update")) {
-    return "A record this refers to does not exist";
+    return messages.validation.referencedRecordMissing;
   }
 
   if (original.startsWith("update or delete")) {
-    return "This record is still referenced by other records";
+    return messages.validation.stillReferenced;
   }
 
   // An older Prisma, or a driver that words it differently. Both halves, since
   // there is no way to tell which one it was.
-  return "A record this refers to does not exist, or this record is still referenced by other records";
+  return messages.validation.foreignKeyEitherWay;
 }
 
 /**
  * Multer reports a rejected upload with a code rather than a sentence, and its
  * own messages ("File too large") say nothing about which field or what the
- * limit is. These do.
+ * limit is - and are in English. These say both, in Arabic.
  *
- * The limits themselves live in modules/uploads/uploads.storage.ts - this only
- * describes them, so keep the two in step.
+ * The `default` branch hands back multer's own English sentence, which is the
+ * honest answer: it only fires on a code we have not seen, and a wrong Arabic
+ * guess would be worse than a right English one.
  */
 function uploadErrorMessage(err: MulterError): string {
   switch (err.code) {
     case "LIMIT_FILE_SIZE":
-      return `${err.field} is larger than the 5 MB limit`;
+      return messages.uploads.tooLarge(err.field ?? "");
     case "LIMIT_UNEXPECTED_FILE":
-      return `${err.field} is not a file this endpoint accepts`;
+      return messages.uploads.unexpectedFile(err.field ?? "");
     case "LIMIT_FILE_COUNT":
-      return "Too many files in one request";
+      return messages.uploads.tooManyFiles;
     case "LIMIT_PART_COUNT":
-      return "Too many parts in the form";
+      return messages.uploads.tooManyParts;
     default:
       return err.message;
   }
@@ -102,7 +104,7 @@ export function notFoundHandler(req: Request, res: Response<ErrorBody>) {
   res.status(404).json({
     error: {
       code: "not_found",
-      message: `Cannot ${req.method} ${req.originalUrl}`,
+      message: messages.generic.routeNotFound(req.method, req.originalUrl),
     },
   });
 }
@@ -130,11 +132,16 @@ export function errorHandler(
   }
 
   // 2. Validation failures from `schema.parse(...)` in a route.
+  //
+  //    `field` stays the English JSON name - it is what the app maps back to an
+  //    input on the form. Only `message` is Arabic, and it is already Arabic by
+  //    the time it gets here: either the schema wrote it, or core/zod-arabic.ts
+  //    supplied it.
   if (err instanceof ZodError) {
     res.status(400).json({
       error: {
         code: "validation_error",
-        message: "The request body or query is invalid",
+        message: messages.validation.invalidRequest,
         details: err.issues.map((issue) => ({
           field: issue.path.join(".") || "(root)",
           message: issue.message,
@@ -165,9 +172,8 @@ export function errorHandler(
       res.status(409).json({
         error: {
           code: "conflict",
-          message: fields.length
-            ? `${fields.join(", ")} is already in use`
-            : "That value is already in use",
+          message: messages.validation.alreadyInUse(fields),
+          // The raw column names, untranslated - `details` is for the app.
           details: { fields },
         },
       });
@@ -176,7 +182,7 @@ export function errorHandler(
 
     if (err.code === "P2025") {
       res.status(404).json({
-        error: { code: "not_found", message: "Resource not found" },
+        error: { code: "not_found", message: messages.generic.notFound },
       });
       return;
     }
@@ -190,11 +196,15 @@ export function errorHandler(
   }
 
   // 5. Anything else is a bug. Log it in full, tell the client nothing.
+  //
+  //    `details` stays as the raw English exception outside production: it is
+  //    for whoever is debugging, not for the user, and translating a stack
+  //    trace would only make it harder to search for.
   console.error(err);
   res.status(500).json({
     error: {
       code: "internal_error",
-      message: "Internal server error",
+      message: messages.generic.serverError,
       details: isProduction ? undefined : String(err),
     },
   });

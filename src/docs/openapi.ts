@@ -99,7 +99,7 @@ const profileExamples = {
 
 const documentExamples = {
   categoryId: "1",
-  nationalId: "/uploads/1712345678-national-id.jpg",
+  nationalId: "29805150101234",
   criminalRecordFile: "/uploads/1712345678-criminal-record.pdf",
   profileImage: "/uploads/1712345678-photo.jpg",
 };
@@ -161,20 +161,24 @@ const signUpFormFields: Record<string, JsonSchema> = {
   },
   nationalId: {
     type: "string",
-    format: "binary",
+    pattern: "^\\d{14}$",
+    minLength: 14,
+    maxLength: 14,
     description:
-      "**Technicians only, and required for them.** The file itself, not a URL. JPEG, PNG or PDF, at most 5 MB.",
+      "**Technicians only, and required for them.** The 14 digits off the card as text, not a photo of it. The birth date (digits 1-7) and the governorate (digits 8-9) have to be real ones; sending it as a file is a `400`.",
+    example: documentExamples.nationalId,
   },
   criminalRecordFile: {
     type: "string",
     format: "binary",
-    description: "Technicians only, optional. Same limits as `nationalId`.",
+    description:
+      "Technicians only, optional. The file itself: JPEG, PNG or PDF, at most 5 MB.",
   },
   profileImage: {
     type: "string",
     format: "binary",
     description:
-      "Technicians only, optional - the photo the app displays. Same limits as `nationalId`.",
+      "Technicians only, optional - the photo the app displays. Same limits as `criminalRecordFile`.",
   },
 };
 
@@ -443,7 +447,7 @@ export const openApiDocument = {
         operationId: "uploadFile",
         summary: "🔨 Upload a file",
         description: [
-          "Where the technician's national ID and criminal record go first: this returns a URL, and that URL is what `POST /api/v1/technician/profile` accepts - never the file itself.",
+          "Where the technician's criminal record and photo go first: this returns a URL, and that URL is what `POST /api/v1/technician/profile` accepts - never the file itself. The national id is not uploaded at all; it is sent as 14 digits of text.",
           "",
           "Planned limits: `image/jpeg`, `image/png` or `application/pdf`, at most 5 MB. The server renames every file, so the name the client sends is ignored.",
           "",
@@ -467,7 +471,7 @@ export const openApiDocument = {
               object({
                 url: {
                   type: "string",
-                  example: "/uploads/1712345678-national-id.jpg",
+                  example: "/uploads/1712345678-criminal-record.pdf",
                 },
               }),
             ),
@@ -576,9 +580,6 @@ export const openApiDocument = {
                 "role",
               ]),
               encoding: {
-                nationalId: {
-                  contentType: "image/jpeg, image/png, application/pdf",
-                },
                 criminalRecordFile: {
                   contentType: "image/jpeg, image/png, application/pdf",
                 },

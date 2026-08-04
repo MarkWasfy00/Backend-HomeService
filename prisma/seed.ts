@@ -25,6 +25,7 @@ import { faker } from "@faker-js/faker";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { pgConnectionConfig } from "../src/core/db-url.js";
+import { governorateCodes } from "../src/core/national-id.js";
 import {
   OfferStatus,
   RequestStatus,
@@ -269,6 +270,26 @@ function somewhereInEgypt() {
     latitude: coord(city.latitude + faker.number.float({ min: -0.08, max: 0.08, fractionDigits: 6 })),
     longitude: coord(city.longitude + faker.number.float({ min: -0.08, max: 0.08, fractionDigits: 6 })),
   };
+}
+
+/**
+ * A national id that passes the rules in src/core/national-id.ts: the century
+ * digit, a real birth date, a real governorate, then the serial and check
+ * digit. Seeded technicians have to survive the API's own validation, or the
+ * first thing an admin sees in the approval queue is data the app would have
+ * rejected.
+ */
+function nationalId(): string {
+  const birthDate = faker.date.birthdate({ mode: "age", min: 21, max: 60 });
+
+  const century = birthDate.getUTCFullYear() < 2000 ? "2" : "3";
+  const year = String(birthDate.getUTCFullYear() % 100).padStart(2, "0");
+  const month = String(birthDate.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(birthDate.getUTCDate()).padStart(2, "0");
+  const governorate = faker.helpers.arrayElement(governorateCodes);
+
+  // Four digits of serial and the check digit, which nothing verifies.
+  return `${century}${year}${month}${day}${governorate}${faker.string.numeric(5)}`;
 }
 
 /** Looks like what POST /public/uploads hands back - see docs/APP-FLOW.md. */
@@ -550,7 +571,7 @@ async function seedUsers(categories: SeededCategory[]) {
             profileImage: faker.datatype.boolean(0.7)
               ? uploadPath("profile", "jpg")
               : null,
-            nationalId: uploadPath("national-id", "jpg"),
+            nationalId: nationalId(),
             criminalRecordFile: faker.datatype.boolean(0.8)
               ? uploadPath("criminal-record", "pdf")
               : null,

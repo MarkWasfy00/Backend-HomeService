@@ -1,6 +1,11 @@
 // Must be first: teaches JSON.stringify how to handle BigInt ids.
 import "./core/serialize.js";
 
+// Puts zod's own validation messages into Arabic. Global and side-effect only,
+// so it has to be imported before the first request is parsed - here is the
+// one place that is guaranteed.
+import "./core/zod-arabic.js";
+
 import express, { type Request, type Response } from "express";
 import { apiRouter } from "./api/index.js";
 import { docsRouter } from "./docs/docs.routes.js";
@@ -31,7 +36,7 @@ app.get("/health/db", async (_req: Request, res: Response) => {
 // `profileImage` of "/uploads/1712-uuid.jpg" is fetched from right here.
 //
 // Anyone holding the URL can read the file: the random name in it is the only
-// thing protecting a national ID, which is why the technician mapper never
+// thing protecting a criminal record, which is why the technician mapper never
 // returns that field to a non-admin. Put these behind a signed URL or a token
 // check before this carries real identity documents.
 //

@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import { env } from "../../core/env.js";
 import { ApiError } from "../../core/errors.js";
+import { messages } from "../../core/messages.js";
 
 /**
  * Signing and verifying JWTs. Pure functions - no database, no `req`/`res`, so
@@ -89,23 +90,23 @@ export function verifyToken(token: string, expected: TokenType): bigint {
     if (err instanceof jwt.TokenExpiredError) {
       throw ApiError.unauthorized(
         expected === "access"
-          ? "Your session has expired, refresh it"
-          : "Your session has expired, sign in again",
+          ? messages.auth.accessTokenExpired
+          : messages.auth.refreshTokenExpired,
       );
     }
 
-    throw ApiError.unauthorized("Invalid token");
+    throw ApiError.unauthorized(messages.auth.invalidToken);
   }
 
   // A token signed without `subject` decodes to a string payload. Ours never
   // is, but the type says it can be, and an unchecked cast here would be a
   // hole rather than a convenience.
   if (typeof payload === "string" || payload.typ !== expected) {
-    throw ApiError.unauthorized("Invalid token");
+    throw ApiError.unauthorized(messages.auth.invalidToken);
   }
 
   if (!payload.sub || !/^\d+$/.test(payload.sub)) {
-    throw ApiError.unauthorized("Invalid token");
+    throw ApiError.unauthorized(messages.auth.invalidToken);
   }
 
   return BigInt(payload.sub);

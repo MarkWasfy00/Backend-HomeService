@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { phoneField } from "../../core/fields.js";
+import { messages } from "../../core/messages.js";
 
 /** POST /public/auth/request-otp */
 export const requestOtpBody = z.object({
@@ -9,7 +10,7 @@ export const requestOtpBody = z.object({
 /** POST /public/auth/verify-otp */
 export const verifyOtpBody = z.object({
   phone: phoneField,
-  otpCode: z.string().trim().regex(/^\d{6}$/, "otpCode must be 6 digits"),
+  otpCode: z.string().trim().regex(/^\d{6}$/, messages.fields.otpCode),
 });
 
 /**
