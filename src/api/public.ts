@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authPublicRoutes } from "../modules/auth/auth.public.routes.js";
 import { categoriesPublicRoutes } from "../modules/categories/categories.public.routes.js";
 import { uploadsPublicRoutes } from "../modules/uploads/uploads.public.routes.js";
+import { requireAuth } from "../modules/auth/auth.middleware.js";
 
 /**
  * Endpoints open to anyone, under /api/v1/public.
@@ -24,4 +25,4 @@ publicRouter.use("/categories", categoriesPublicRoutes); // task 1
 // it is the one endpoint here that writes to disk on a stranger's say-so.
 // Worth moving behind `requireAuth` once it is implemented - a technician
 // always has a token by the time they upload their documents.
-publicRouter.use("/uploads", uploadsPublicRoutes);
+publicRouter.use("/uploads", requireAuth, uploadsPublicRoutes);

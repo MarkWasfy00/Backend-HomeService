@@ -8,11 +8,10 @@ import { messages } from "./messages.js";
  * Anything used by a single module belongs in that module's own schema file.
  */
 
-/** Phone is the only identity in this app, so the rule matters. */
 export const phoneField = z
   .string()
   .trim()
-  .regex(/^\+?\d{7,19}$/, messages.fields.phone);
+  .regex(/^\+201(?:0|1|2|5)\d{8}$/, messages.fields.phone);
 
 /** Our primary keys are BigInt, but a URL always hands us a string. */
 export const idField = z
